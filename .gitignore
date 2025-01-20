@@ -30,3 +30,15 @@ testem.log
 
 # PyCharm
 .idea/*
+
+# Testing data
+metrics_utility/test/test_data/data/**/*.csv
+metrics_utility/test/test_data/data/**/*.json
+!metrics_utility/test/test_data/data/**/*.tar.gz
+
+
+# Reports
+/metrics_utility/test/test_data/reports/
+
+# Shipped data - for regular usage during developement
+/shipped_data/
