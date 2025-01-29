@@ -1,5 +1,6 @@
 import os
-from metrics_utility.exceptions import BadShipTarget, MissingRequiredEnvVar, BadRequiredEnvVar
+
+from metrics_utility.exceptions import MissingRequiredEnvVar
 
 
 def handle_directory_ship_target(ship_target):

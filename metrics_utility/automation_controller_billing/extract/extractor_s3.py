@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 import os
@@ -7,7 +6,8 @@ import tempfile
 
 import pandas as pd
 
-from metrics_utility.automation_controller_billing.base.s3_handler import S3Handler
+from metrics_utility.automation_controller_billing.base.s3_handler import \
+    S3Handler
 
 
 class ExtractorS3():
@@ -116,7 +116,7 @@ class ExtractorS3():
             with open(file_path) as f:
                 config_data = json.loads(f.read())
             return config_data
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             self.logger.warn(f"{self.LOG_PREFIX} missing required file under path: {self.path} and date: {self.date}")
             # raise MissingRequiredFile(self.filename) from e
 
