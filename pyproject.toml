@@ -29,3 +29,31 @@ requires-python = ">=3.11, <3.13"
 [tool.ruff]
 # Allow longer lines than ruff's default 88.
 line-length = 150
+# PEP 8 standard
+indent-width = 4
+
+[tool.ruff.format]
+# Normalize double quotes to single quotes
+quote-style = "single"
+# No tabs, spaces only
+indent-style = "space"
+
+[tool.ruff.lint]
+extend-select = [
+# Essential PEP 8 errors (indentation, syntax)
+    "E",
+# PEP 8 warnings (whitespace, line breaks)
+    "W",
+# PEP 8 naming conventions
+#   "N",
+# Python syntax upgrades
+#   "UP",
+]
+
+[tool.ruff.lint.isort]
+# Separate direct imports from 'from' imports
+lines-between-types = 1
+# Order alphabetically and by case
+order-by-type = true
+# Use a single line after each import block
+lines-after-imports = 1
