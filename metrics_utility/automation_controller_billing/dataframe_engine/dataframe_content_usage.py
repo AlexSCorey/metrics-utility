@@ -1,5 +1,6 @@
 import logging
 import re
+from debug_utils import print_data, print_debug
 
 import pandas as pd
 
@@ -67,12 +68,14 @@ class DataframeContentUsage(Base):
                 ################################
                 # Do the aggregation
                 ################################
+                print_debug(f'\nComputing data batch for {date}')
+                print_data(events, "Events data")
                 events_group = events.groupby(
                     self.unique_index_columns(), dropna=False
                 ).agg(
                     task_runs=('module_name', 'count'),
                     duration=('duration', "sum"))
-
+                print_data(events, "Aggregated Events data")
                 # Duration is null in older versions of Controller
                 events_group['duration'] = events_group.duration.fillna(0)
                 # Tweak types to match the table

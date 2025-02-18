@@ -5,7 +5,7 @@ import os
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import relativedelta
 from django.core.management.base import BaseCommand
-from django.utils import timezone
+from datetime import timezone
 
 from metrics_utility.automation_controller_billing.dataframe_engine.factory import \
     Factory as DataframeEngineFactory
@@ -55,6 +55,10 @@ class Command(BaseCommand):
                             action='store_true',
                             help='With this option, the existing reports will be overwritten if '\
                                  'running this command again.')
+        parser.add_argument('--verbose',
+                            dest='verbose',
+                            action='store_true',
+                            help='Starts to print debug information to terminal.')
 
     def init_logging(self):
         self.logger = logging.getLogger('awx.main.analytics')

@@ -1,4 +1,5 @@
 import logging
+from debug_utils import print_data, print_debug
 
 import pandas as pd
 
@@ -17,18 +18,17 @@ class DataframeJobhostSummaryUsage(Base):
     def build_dataframe(self):
         # A daily rollup dataframe
         billing_data_monthly_rollup = None
-
         for date in self.dates():
             ###############################
             # Generate the monthly dataset for report
             ###############################
-
             for data in self.extractor.iter_batches(date=date):
                 # If the dataframe is empty, skip additional processing
                 billing_data = data['job_host_summary']
                 if billing_data.empty:
                     continue
 
+                print_debug(f'\nComputing data batch for {date}')
                 billing_data['organization_name'] = billing_data.organization_name.fillna("No organization name")
                 billing_data['install_uuid'] = data['config']['install_uuid']
 
@@ -59,6 +59,7 @@ class DataframeJobhostSummaryUsage(Base):
                 # Do the aggregation
                 ################################
 
+                print_data(billing_data, 'New loaded data batch')
                 billing_data_group = billing_data.groupby(
                     self.unique_index_columns(), dropna=False
                 ).agg(
@@ -68,6 +69,7 @@ class DataframeJobhostSummaryUsage(Base):
                     last_automation=('created', 'max'),
                     job_created=('job_created', 'max'),
                     )
+                print_data(billing_data_group, 'New data batch after aggregation')
 
                 # Tweak types to match the table
                 billing_data_group = self.cast_dataframe(billing_data_group, self.cast_types())
@@ -84,7 +86,7 @@ class DataframeJobhostSummaryUsage(Base):
                         billing_data_group.loc[:, ],
                         on=self.unique_index_columns(),
                         how='outer')
-
+                    print_data(billing_data_monthly_rollup, "Global data outer join batch data")
                     billing_data_monthly_rollup = self.summarize_merged_dataframes(
                         billing_data_monthly_rollup, self.data_columns(),
                         operations={"first_automation": "min",
@@ -94,6 +96,8 @@ class DataframeJobhostSummaryUsage(Base):
                     # Tweak types to match the table
                     billing_data_monthly_rollup = self.cast_dataframe(
                         billing_data_monthly_rollup, self.cast_types())
+
+                print_data(billing_data_monthly_rollup, "Actual global data")
 
         if billing_data_monthly_rollup is None:
             return None
