@@ -1,0 +1,79 @@
+name: "Pytest tests"
+
+on:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout metrics-utility (${{ github.ref }})"
+        uses: actions/checkout@v4
+
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v5
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: "Set up postgresql"
+        run: |
+          sudo apt install postgresql postgresql-client
+          sudo systemctl start postgresql.service  # ubuntu
+
+      - name: "Wait for postgresql"
+        timeout-minutes: 1
+        run: |
+          until pg_isready; do
+            sleep 4
+          done
+
+      - name: "Import SQL dump"
+        run: |
+          cat tools/docker/{roles,latest}.sql | sudo su - postgres -c psql
+
+      - name: "Set up minio"
+        env:
+          MINIO_ROOT_USER: minioaccess
+          MINIO_ROOT_PASSWORD: miniosecret
+        run: |
+          mkdir -p ~/.local/bin
+          curl https://dl.min.io/client/mc/release/linux-amd64/mc -o ~/.local/bin/mc
+          curl https://dl.min.io/server/minio/release/linux-amd64/minio -o ~/.local/bin/minio
+          chmod +x ~/.local/bin/{mc,minio}
+
+          mkdir minio-data
+          minio server ./minio-data --console-address ":9001" &
+
+      - name: "Wait for minio"
+        timeout-minutes: 1
+        env:
+          MINIO_ROOT_USER: minioaccess
+          MINIO_ROOT_PASSWORD: miniosecret
+        run: |
+          until mc alias set local http://localhost:9000 minioaccess miniosecret; do
+            sleep 4
+          done
+
+      - name: "Create minio user"
+        env:
+          MINIO_ROOT_USER: minioaccess
+          MINIO_ROOT_PASSWORD: miniosecret
+        run: |
+          mc alias set local http://localhost:9000 minioaccess miniosecret
+          mc mb --ignore-existing local/metricsutilitys3
+          mc admin user add local mynewuser mysecretpassword
+          mc admin policy attach local readwrite --user=mynewuser
+          mc admin accesskey create local mynewuser --access-key myuseraccesskey --secret-key myusersecretkey
+
+      - name: "Run pytest"
+        env:
+          METRICS_UTILITY_BUCKET_ACCESS_KEY: "myuseraccesskey"
+          METRICS_UTILITY_BUCKET_ENDPOINT: "http://localhost:9000"
+          METRICS_UTILITY_BUCKET_NAME: "metricsutilitys3"
+          METRICS_UTILITY_BUCKET_REGION: "us-east-1"
+          METRICS_UTILITY_BUCKET_SECRET_KEY: "myusersecretkey"
+        run: |
+          env # pytest -s -v
