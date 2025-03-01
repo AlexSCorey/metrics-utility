@@ -6,6 +6,8 @@ import pandas as pd
 from metrics_utility.automation_controller_billing.dataframe_engine.base import \
     Base
 
+from metrics_utility.metric_utils import INCLUDE_INDIRECT, DIRECT, INDIRECT
+
 logger = logging.getLogger(__name__)
 
 #######################################
@@ -27,10 +29,26 @@ class DataframeJobhostSummaryUsage(Base):
             for data in self.extractor.iter_batches(date=date):
                 # If the dataframe is empty, skip additional processing
                 billing_data = data['job_host_summary']
-                if billing_data.empty:
-                    continue
+                device_type = DIRECT
+
+                if not billing_data.empty:
+                    billing_data["device_type"] = DIRECT
+                else:
+                    billing_data = data['indirect_nodes']
+                    device_type = INDIRECT
+
+                    if billing_data.empty:
+                        continue
+                    else:
+
+                        if INCLUDE_INDIRECT:
+                            billing_data["device_type"] = INDIRECT
+                        else:
+                            continue
 
                 print_debug(f'\nComputing data batch for {date}')
+                print_data(billing_data, "Newly loaded data")
+
                 billing_data['organization_name'] = billing_data.organization_name.fillna("No organization name")
                 billing_data['install_uuid'] = data['config']['install_uuid']
 
@@ -46,7 +64,9 @@ class DataframeJobhostSummaryUsage(Base):
                 # Sumarize all task counts into 1 col
                 def sum_columns(row):
                     return sum([row[i] for i in ['dark', 'failures', 'ok', 'skipped', 'ignored',  'rescued']])
-                billing_data['task_runs'] = billing_data.apply(sum_columns, axis=1)
+
+                if device_type == DIRECT:
+                    billing_data['task_runs'] = billing_data.apply(sum_columns, axis=1)
 
                 billing_data['created'] = pd.to_datetime(
                     billing_data['created']).dt.tz_localize(None)
@@ -70,6 +90,7 @@ class DataframeJobhostSummaryUsage(Base):
                     first_automation=('created', 'min'),
                     last_automation=('created', 'max'),
                     job_created=('job_created', 'max'),
+                    device_type=('device_type', 'min'),
                     )
                 print_data(billing_data_group, 'New data batch after aggregation')
 
@@ -94,7 +115,9 @@ class DataframeJobhostSummaryUsage(Base):
                         billing_data_monthly_rollup, self.data_columns(),
                         operations={"first_automation": "min",
                                     "last_automation": "max",
-                                    "job_created": "max"})
+                                    "job_created": "max",
+                                    "device_type" : "min",
+                                    })
 
                     # Tweak types to match the table
                     billing_data_monthly_rollup = self.cast_dataframe(
@@ -113,12 +136,13 @@ class DataframeJobhostSummaryUsage(Base):
 
     @staticmethod
     def data_columns():
-        return ['host_runs', 'task_runs', 'first_automation', 'last_automation', 'job_created']
+        return ['host_runs', 'task_runs', 'first_automation', 'last_automation', 'job_created', 'device_type']
 
     @staticmethod
     def cast_types():
         return {'task_runs': int,
                 'host_runs': int,
+                'device_type' : int,
                 'first_automation': 'datetime64[ns]',
                 'last_automation': 'datetime64[ns]',
                 'job_created': 'datetime64[ns]',

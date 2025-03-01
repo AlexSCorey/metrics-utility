@@ -8,9 +8,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
-
 from metrics_utility.automation_controller_billing.report.base import Base
 
+from metrics_utility.metric_utils import INCLUDE_INDIRECT, DIRECT, INDIRECT
 
 class ReportCCSPv2(Base):
     # BLACK_COLOR_HEX = "00000000"
@@ -132,34 +132,42 @@ class ReportCCSPv2(Base):
             current_row = self._build_header(current_row, ws)
             current_row = self._build_po_number(current_row, ws)
             current_row = self._build_updated_timestamp(current_row, ws)
-            current_row = self._build_data_section(current_row, ws, job_host_summary_dataframe)
+            self._build_data_section(current_row, ws, job_host_summary_dataframe)
             sheet_index += 1
 
         if "jobs" in self.optional_report_sheets():
             # Sheet with usage by org
             self.wb.create_sheet(title="Jobs")
             ws = self.wb.worksheets[sheet_index]
-            current_row = self._build_data_section_usage_by_job(1, ws, job_host_summary_dataframe)
+            self._build_data_section_usage_by_job(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
-        if "managed_nodes_by_organizations" in self.optional_report_sheets() and "managed_nodes" in self.optional_report_sheets():
+        if "managed_nodes" in self.optional_report_sheets():
+            # Determine the function to use
+            if "managed_nodes_by_organizations" in self.optional_report_sheets():
+                func = self._build_data_section_usage_by_node_with_org_details
+            else:
+                func = self._build_data_section_usage_by_node
+
             # Sheet with list of managed nodes
             self.wb.create_sheet(title="Managed nodes")
             ws = self.wb.worksheets[sheet_index]
-            current_row = self._build_data_section_usage_by_node_with_org_details(1, ws, job_host_summary_dataframe)
+            directs = job_host_summary_dataframe[job_host_summary_dataframe['device_type'] == DIRECT]
+            func(1, ws, directs)
             sheet_index += 1
-        elif "managed_nodes" in self.optional_report_sheets():
-            # Sheet with list of managed nodes
-            self.wb.create_sheet(title="Managed nodes")
-            ws = self.wb.worksheets[sheet_index]
-            current_row = self._build_data_section_usage_by_node(1, ws, job_host_summary_dataframe)
-            sheet_index += 1
+
+            if INCLUDE_INDIRECT:
+                self.wb.create_sheet(title="Indirectly Managed nodes")
+                ws = self.wb.worksheets[sheet_index]
+                indirects = job_host_summary_dataframe[job_host_summary_dataframe['device_type'] == INDIRECT]
+                func(1, ws, indirects)
+                sheet_index += 1
 
         if "usage_by_organizations" in self.optional_report_sheets():
             # Sheet with usage by org
             self.wb.create_sheet(title="Usage by organizations")
             ws = self.wb.worksheets[sheet_index]
-            current_row = self._build_data_section_usage_by_org(1, ws, job_host_summary_dataframe)
+            self._build_data_section_usage_by_org(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
         if events_dataframe is not None:
@@ -167,21 +175,21 @@ class ReportCCSPv2(Base):
                 # Sheet with usage by collections
                 self.wb.create_sheet(title="Usage by collections")
                 ws = self.wb.worksheets[sheet_index]
-                current_row = self._build_data_section_usage_by_collections(1, ws, events_dataframe)
+                self._build_data_section_usage_by_collections(1, ws, events_dataframe)
                 sheet_index += 1
 
             if "usage_by_roles" in self.optional_report_sheets():
                 # Sheet with usage by roles
                 self.wb.create_sheet(title="Usage by roles")
                 ws = self.wb.worksheets[sheet_index]
-                current_row = self._build_data_section_usage_by_roles(1, ws, events_dataframe)
+                self._build_data_section_usage_by_roles(1, ws, events_dataframe)
                 sheet_index += 1
 
             if "usage_by_modules" in self.optional_report_sheets():
                 # Sheet with usage by modules
                 self.wb.create_sheet(title="Usage by modules")
                 ws = self.wb.worksheets[sheet_index]
-                current_row = self._build_data_section_usage_by_modules(1, ws, events_dataframe)
+                self._build_data_section_usage_by_modules(1, ws, events_dataframe)
                 sheet_index += 1
 
         if "managed_nodes_by_organizations" in self.optional_report_sheets():
@@ -194,12 +202,13 @@ class ReportCCSPv2(Base):
                 # Filter the data for a certain organization
                 filtered_job_host_summary_dataframe = job_host_summary_dataframe[
                     job_host_summary_dataframe["organization_name"] == organization_name]
-                current_row = self._build_data_section_usage_by_node(1, ws, filtered_job_host_summary_dataframe, mode="by_organization")
+                self._build_data_section_usage_by_node(1, ws, filtered_job_host_summary_dataframe, mode="by_organization")
                 sheet_index += 1
 
         return self.wb
 
     def _build_data_section_usage_by_org(self, current_row, ws, dataframe):
+
         for key, value in self.config['data_column_widths'].items():
             ws.column_dimensions[get_column_letter(key)].width = value
 
@@ -213,16 +222,38 @@ class ReportCCSPv2(Base):
 
         dataframe['job_remote_id_install_uuid'] = list(zip(dataframe['job_remote_id'], dataframe['install_uuid']))
 
-        # Rename the columns based on the template
-        ccsp_report_dataframe = (
-            dataframe.groupby('organization_name', dropna=False)
-            .agg(
-                job_runs=('job_remote_id_install_uuid', 'nunique'),
-                host_runs_unique=('host_name', 'nunique'),
-                host_runs=('host_name', 'count'),
-                task_runs=('task_runs', 'sum')
+        agg_dict = {
+            "job_runs": ("job_remote_id_install_uuid", "nunique"),
+            # Only count host_name if the device_type is "DIRECT"
+            "host_runs_unique": (
+                "host_name",
+                lambda x: x[dataframe.loc[x.index, "device_type"] == DIRECT].nunique()
+            ),
+            "host_runs": (
+                "host_name",
+                lambda x: x[dataframe.loc[x.index, "device_type"] == DIRECT].count()
+            ),
+            "task_runs": ("task_runs", "sum"),
+        }
+
+        # Add the INDIRECT aggregations only if the condition is met
+        if INCLUDE_INDIRECT:
+            agg_dict["indirect_host_runs_unique"] = (
+                "host_name",
+                lambda x: x[dataframe.loc[x.index, "device_type"] == INDIRECT].nunique()
             )
+            agg_dict["indirect_host_runs"] = (
+                "host_name",
+                lambda x: x[dataframe.loc[x.index, "device_type"] == INDIRECT].count()
+            )
+
+        # Now pass this dictionary into .agg()
+        ccsp_report_dataframe = (
+            dataframe
+            .groupby("organization_name", dropna=False)
+            .agg(**agg_dict)
         )
+
         ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
         ccsp_report_dataframe = ccsp_report_dataframe.reindex(
             columns=[
@@ -230,19 +261,31 @@ class ReportCCSPv2(Base):
                 'job_runs',
                 'host_runs_unique',
                 'host_runs',
+                'indirect_host_runs_unique',
+                'indirect_host_runs',
                 'task_runs'
             ]
         )
+
+        if not INCLUDE_INDIRECT:
+            ccsp_report_dataframe.drop(['indirect_host_runs_unique', 'indirect_host_runs'], axis=1, inplace=True)
 
         ccsp_report_dataframe = ccsp_report_dataframe.rename(
             columns={
                 "organization_name": "Organization name",
                 "job_runs": "Job runs",
+
                 "host_runs_unique": "Unique managed nodes\nautomated",
                 "host_runs": "Non-unique managed\nnodes automated",
+
+                "indirect_host_runs_unique": "Unique indirect managed nodes\nautomated",
+                "indirect_host_runs": "Non-unique indirect managed\nnodes automated",
+
                 "task_runs": "Number of task\nruns",
             }
         )
+
+
 
         row_counter = 0
         rows = dataframe_to_rows(ccsp_report_dataframe, index=False)
