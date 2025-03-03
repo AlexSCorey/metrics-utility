@@ -186,7 +186,7 @@ python manage.py build_report --since=5months
 python manage.py build_report --since=2024-05-01 --until=2024-09-30
 ```
 
-### Example with Controller's database as a storage RENEWAL_GUIDANCE type
+### Example with Controller's database as a storage RENEWAL\_GUIDANCE type
 
 ```
 # Set extra ENV VARs for report generation purposes
@@ -226,16 +226,4 @@ metrics-utility gather_automation_controller_billing_data --dry-run --since=2023
 
 ## Developer Setup
 
-For developers contributing to this project, refer to the [Developer Setup Guide](developer_setup.md) for detailed instructions on setting up your local development environment, installing dependencies, and configuring pre-commit hooks.
-
----
-
-## Available Documentation
-
-Additional documentation is available in the `/docs` directory. This includes:
-
-- **Developer Setup**: [docs/developer_setup.md](developer_setup.md)
-
-Please note that this is the upstream documentation for the metrics-utility project. Additional internal downstream documentation, accessible only to the Ansible organization, is maintained separately in the [Ansible Handbook](https://github.com/ansible/handbook/tree/main/The%20Ansible%20Engineering%20Handbook/docs/AAP/Services/Metrics).
-
-As the project grows, more guides and references will be added to the `/docs` folder.
+For developers contributing to this project, refer to the [Developer Setup Guide](./developer_setup.md) for detailed instructions on setting up your local development environment, installing dependencies, and configuring pre-commit hooks.
