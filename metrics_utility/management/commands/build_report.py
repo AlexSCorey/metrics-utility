@@ -5,7 +5,7 @@ import os
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import relativedelta
 from django.core.management.base import BaseCommand
-from django.utils import timezone
+from datetime import timezone
 
 from metrics_utility.automation_controller_billing.dataframe_engine.factory import \
     Factory as DataframeEngineFactory
@@ -130,7 +130,7 @@ class Command(BaseCommand):
 
         if report_dataframe[0] is None or report_dataframe[0].empty:
             if opt_since is not None:
-                self.logger.info(f'No billing data for input date range {extra_params["opt_since"]}--{extra_params["opt_until"]}')
+                self.logger.info(f'No billing data for input date range {extra_params["since_date"]}--{extra_params["until_date"]}')
             else:
                 self.logger.info(f'No billing data for month {opt_month}')
             return

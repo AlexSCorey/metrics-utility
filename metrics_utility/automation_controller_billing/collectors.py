@@ -10,13 +10,13 @@ from django.conf import settings
 from django.db import connection
 from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
+
 # TODO: enhance the CsvFIleSplitter base class and use that
 from insights_analytics_collector import register  # , CsvFileSplitter
 
-from metrics_utility.automation_controller_billing.csv_file_splitter import \
-    CsvFileSplitter
+from metrics_utility.automation_controller_billing.csv_file_splitter import CsvFileSplitter
 
-from metrics_utility.metric_utils import INCLUDE_INDIRECT, get_optional_collectors
+from metrics_utility.metric_utils import get_optional_collectors
 
 """
 This module is used to define metrics collected by
@@ -34,6 +34,7 @@ All functions - when called - will be passed a datetime.datetime object,
 functions - like those that return metadata about playbook runs, may return
 data _since_ the last report date - i.e., new data in the last 24 hours)
 """
+
 
 def daily_slicing(key, last_gather, **kwargs):
     since, until = kwargs.get('since', None), kwargs.get('until', now())
@@ -63,6 +64,24 @@ def daily_slicing(key, last_gather, **kwargs):
         end = min(start + timedelta(days=1), until)
         yield (start, end)
         start = end
+
+
+def limit_slicing(key, last_gather, **kwargs):
+    # For tables where we always need to do a table full scan, we want to load batches
+
+    # TODO: skip today's collection if it already happened, so we don't load full inventory
+    # every collection, which can be e.g. every 10 minutes. If the last_gather_was from today
+    # we should be able to skip the collection.
+
+    # For now, we'll always store the inventory snapshot into daily partition.
+    # It's not possible to collect historical state of inventory, so we always insert it
+    # into a daily partition of now.
+    today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # TODO: we should load day in batches of i.e. 100k nodes, just doing marker based pagination based
+    # on primary key
+    yield (today, today)
+
 
 @register('config', '1.0', description=_('General platform configuration.'), config=True)
 def config(since, **kwargs):
@@ -112,8 +131,8 @@ def config(since, **kwargs):
         'logging_aggregators': settings.LOG_AGGREGATOR_LOGGERS,
         'external_logger_enabled': settings.LOG_AGGREGATOR_ENABLED,
         'external_logger_type': getattr(settings, 'LOG_AGGREGATOR_TYPE', None),
-        'metrics_utility_version': "0.4.1", # TODO read from setup.cfg
-        'billing_provider_params': {} # Is being overwritten in collector.gather by set ENV VARS
+        'metrics_utility_version': '0.4.1',  # TODO read from setup.cfg
+        'billing_provider_params': {},  # Is being overwritten in collector.gather by set ENV VARS
     }
 
 
@@ -146,10 +165,47 @@ def _copy_table_aap_2_5_and_above(cursor, query, file):
             file.write(byte_data.decode())
 
 
+def yaml_and_json_parsing_functions():
+    query = """
+            -- Define function for parsing field out of yaml encoded as text
+            CREATE OR REPLACE FUNCTION metrics_utility_parse_yaml_field(
+                str text,
+                field text
+            )
+            RETURNS text AS
+            $$
+            DECLARE
+                line_re text;
+                field_re text;
+            BEGIN
+                field_re := ' *[:=] *(.+?) *$';
+                line_re := '(?n)^' || field || field_re;
+                RETURN trim(both '"' from substring(str from line_re) );
+            END;
+            $$
+            LANGUAGE plpgsql;
+
+            -- Define function to check if field is a valid json
+            CREATE OR REPLACE FUNCTION metrics_utility_is_valid_json(p_json text)
+                returns boolean
+            AS
+            $$
+            BEGIN
+                RETURN (p_json::json is not null);
+            EXCEPTION
+                WHEN others THEN
+                    RETURN false;
+            END;
+            $$
+            LANGUAGE plpgsql;
+        """
+    return query
+
+
 @register('job_host_summary', '1.2', format='csv', description=_('Data for billing'), fnc_slicing=daily_slicing)
 def job_host_summary_table(since, full_path, until, **kwargs):
     # TODO: controler needs to have an index on main_jobhostsummary.modified
-    prepend_query = '''
+    prepend_query = """
         -- Define function for parsing field out of yaml encoded as text
         CREATE OR REPLACE FUNCTION metrics_utility_parse_yaml_field(
             str text,
@@ -181,9 +237,9 @@ def job_host_summary_table(since, full_path, until, **kwargs):
         END;
         $$
         LANGUAGE plpgsql;
-    '''
+    """
 
-    query = f'''
+    query = f"""
         (SELECT main_jobhostsummary.id,
                 main_jobhostsummary.created,
                 main_jobhostsummary.modified,
@@ -234,12 +290,9 @@ def job_host_summary_table(since, full_path, until, **kwargs):
                 LEFT JOIN main_host ON main_host.id = main_jobhostsummary.host_id
                 WHERE (main_jobhostsummary.modified >= '{since.isoformat()}' AND main_jobhostsummary.modified < '{until.isoformat()}')
                 ORDER BY main_jobhostsummary.modified ASC)
-        '''
+        """
 
-    return _copy_table(table='main_jobhostsummary',
-                       query=f"COPY {query} TO STDOUT WITH CSV HEADER",
-                       path=full_path,
-                       prepend_query=prepend_query)
+    return _copy_table(table='main_jobhostsummary', query=f'COPY {query} TO STDOUT WITH CSV HEADER', path=full_path, prepend_query=prepend_query)
 
 
 @register('main_jobevent', '1.0', format='csv', description=_('Content usage'), fnc_slicing=daily_slicing)
@@ -248,9 +301,9 @@ def main_jobevent_table(since, full_path, until, **kwargs):
         return None
 
     tbl = 'main_jobevent'
-    event_data = fr"replace({tbl}.event_data, '\u', '\u005cu')::jsonb"
+    event_data = rf"replace({tbl}.event_data, '\u', '\u005cu')::jsonb"
 
-    query = f'''
+    query = f"""
         WITH job_scope AS (
             SELECT main_jobhostsummary.id AS main_jobhostsummary_id,
                    main_jobhostsummary.created AS main_jobhostsummary_created,
@@ -295,15 +348,13 @@ def main_jobevent_table(since, full_path, until, **kwargs):
                               'runner_item_on_ok',
                               'runner_item_on_failed',
                               'runner_item_on_skipped')
-        '''
-    return _copy_table(table=tbl,
-                       query=f"COPY ({query}) TO STDOUT WITH CSV HEADER",
-                       path=full_path)
+        """
+    return _copy_table(table=tbl, query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path)
 
-@register('indirect_nodes', '1.0', format='csv', description=_('Data for billing'), fnc_slicing=daily_slicing)
-def indirect_nodes_table(since, full_path, until, **kwargs):
 
-    if not INCLUDE_INDIRECT:
+@register('main_indirectmanagednodeaudit', '1.0', format='csv', description=_('Data for billing'), fnc_slicing=daily_slicing)
+def main_indirectmanagednodeaudit_table(since, full_path, until, **kwargs):
+    if 'main_indirectmanagednodeaudit' not in get_optional_collectors():
         return None
 
     query = f"""
@@ -344,7 +395,56 @@ def indirect_nodes_table(since, full_path, until, **kwargs):
         )
         """
 
-    return _copy_table(table='main_indirectmanagednodeaudit',
-                       query=f"COPY ({query}) TO STDOUT WITH CSV HEADER",
-                       path=full_path)
+    return _copy_table(table='main_indirectmanagednodeaudit', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path)
 
+
+@register('main_host', '1.0', format='csv', description=_('Inventory data'), fnc_slicing=limit_slicing)
+def main_host_table(since, full_path, until, **kwargs):
+    if 'main_host' not in get_optional_collectors():
+        return None
+
+    query = """
+        (
+            SELECT main_host.name as host_name,
+                   main_host.id AS host_id,
+                   main_inventory.id AS inventory_remote_id,
+                   main_inventory.name AS inventory_name,
+                   main_organization.id AS organization_remote_id,
+                   main_organization.name AS organization_name,
+                   main_unifiedjob.created AS last_automation,
+
+                   CASE
+                       WHEN (metrics_utility_is_valid_json(main_host.variables))
+                           THEN main_host.variables::jsonb->>'ansible_host'
+                       ELSE metrics_utility_parse_yaml_field(main_host.variables, 'ansible_host' )
+                   END AS ansible_host_variable,
+
+                   jsonb_build_object(
+                       'ansible_product_serial', main_host.ansible_facts->>'ansible_product_serial'::TEXT,
+                       'ansible_machine_id', main_host.ansible_facts->>'ansible_machine_id'::TEXT
+                   ) AS canonical_facts,
+
+                   jsonb_build_object(
+                       'ansible_connection_variable',
+                       CASE
+                           WHEN (metrics_utility_is_valid_json(main_host.variables))
+                              THEN main_host.variables::jsonb->>'ansible_connection'
+                           ELSE metrics_utility_parse_yaml_field(main_host.variables, 'ansible_connection' )
+                       END
+                   ) AS facts
+
+            FROM main_host
+            LEFT JOIN main_inventory
+                ON main_inventory.id = main_host.inventory_id
+            LEFT JOIN main_organization
+                ON main_organization.id = main_inventory.organization_id
+            LEFT JOIN main_unifiedjob
+                ON main_unifiedjob.id = main_host.last_job_id
+            WHERE enabled='t'
+            ORDER BY main_host.id ASC
+        )
+        """
+
+    return _copy_table(
+        table='main_host', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path, prepend_query=yaml_and_json_parsing_functions()
+    )

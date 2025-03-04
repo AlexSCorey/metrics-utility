@@ -2,10 +2,12 @@
 # Code for building the spreadsheet
 ######################################
 import os
+import json
 
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
+from metrics_utility.automation_controller_billing.helpers import merge_json_sets, merge_arrays
 
 
 class Base:
@@ -24,6 +26,21 @@ class Base:
             'METRICS_UTILITY_OPTIONAL_CCSP_REPORT_SHEETS',
             'ccsp_summary,managed_nodes,usage_by_organizations,usage_by_collections,usage_by_roles,'\
             'usage_by_modules').split(",")
+
+    def convert_cell(self, cell):
+        # If the cell is a dictionary, convert each set value to a sorted list, then dump as a JSON string.
+        if isinstance(cell, dict):
+            new_cell = {k: sorted(list(v)) if isinstance(v, set) else v for k, v in cell.items()}
+            return json.dumps(new_cell)
+        # If the cell itself is a set, convert it to a sorted list and then to a JSON string.
+        elif isinstance(cell, set):
+            return json.dumps(sorted(list(cell)))
+        # If the cell is a list, convert any set elements inside to sorted lists and dump as a JSON string.
+        elif isinstance(cell, list):
+            new_cell = [sorted(list(item)) if isinstance(item, set) else item for item in cell]
+            return json.dumps(new_cell)
+        # Otherwise, return the cell unchanged.
+        return cell
 
     def _fix_event_host_names(self, mapping_dataframe, destination_dataframe):
         if destination_dataframe is None:
@@ -49,7 +66,7 @@ class Base:
         return destination_dataframe
 
 
-    def _build_data_section_usage_by_node_with_org_details(self, current_row, ws, dataframe, mode=None):
+    def _build_data_section_usage_by_node_with_org_details(self, current_row, ws, dataframe, mode=None, managed_node_type=None):
         for key, value in self.config['data_column_widths'].items():
             ws.column_dimensions[get_column_letter(key)].width = value
 
@@ -211,9 +228,7 @@ class Base:
 
         return current_row + row_counter
 
-
-
-    def _build_data_section_usage_by_node(self, current_row, ws, dataframe, mode=None):
+    def _build_data_section_scope(self, current_row, ws, dataframe, mode=None):
         for key, value in self.config['data_column_widths'].items():
             ws.column_dimensions[get_column_letter(key)].width = value
 
@@ -225,17 +240,93 @@ class Base:
                           size=10,
                           color=self.BLACK_COLOR_HEX)
 
-        # Rename the columns based on the template
-        ccsp_report_dataframe = (
-            dataframe.groupby('host_name', dropna=False)
-            .agg(
-                organizations=('organization_name', 'nunique'),
-                host_runs=('host_name', 'count'),
-                task_runs=('task_runs', 'sum'),
-                first_automation=('first_automation', 'min'),
-                last_automation=('last_automation', 'max')
-            )
+        ccsp_report_dataframe = dataframe
+
+        # Convert arrays and dict fields into string, so they can be rendered into xlsx
+        for col in ['organizations', 'inventories', 'canonical_facts', 'facts']:
+            ccsp_report_dataframe[col] = ccsp_report_dataframe[col].apply(self.convert_cell)
+
+        # We're not showing cluster/install_uuid until we support multi-cluster view officially
+        del ccsp_report_dataframe['install_uuid']
+
+        columns = [
+            'host_name',
+            'last_automation',
+            'organizations',
+            'inventories',
+            'canonical_facts',
+            'facts',
+        ]
+
+        labels = {
+            "host_name": "Host name",
+            "last_automation": "Last\nAutomation",
+            "organizations": "Organizations",
+            "inventories": "Inventories",  # Job runs is the same as host_runs, Non-unique managed nodes automated
+            "canonical_facts": "Canonical Facts",
+            'facts': "Facts",
+        }
+        labels = {k:v for k, v in labels.items() if k in columns}
+        ccsp_report_dataframe = ccsp_report_dataframe.rename(
+            columns=labels
         )
+
+        row_counter = 0
+        rows = dataframe_to_rows(ccsp_report_dataframe, index=False)
+        for r_idx, row in enumerate(rows, current_row):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+
+                if row_counter == 0:
+                    # set header style
+                    cell.font = header_font
+                    rd = ws.row_dimensions[r_idx]
+                    rd.height = 25
+                else:
+                    # set value style
+                    cell.font = value_font
+
+            row_counter += 1
+
+        return current_row + row_counter
+
+
+    def _build_data_section_usage_by_node(self, current_row, ws, dataframe, mode=None, managed_node_type=None):
+        for key, value in self.config['data_column_widths'].items():
+            ws.column_dimensions[get_column_letter(key)].width = value
+
+        header_font = Font(name=self.FONT,
+                           size=10,
+                           color=self.BLACK_COLOR_HEX,
+                           bold=True)
+        value_font = Font(name=self.FONT,
+                          size=10,
+                          color=self.BLACK_COLOR_HEX)
+
+        agg_dict = {
+            "organizations": ('organization_name', 'nunique'),
+            "host_runs": ('host_name', 'count'),
+            "task_runs": ('task_runs', 'sum'),
+            "first_automation": ('first_automation', 'min'),
+            "last_automation": ('last_automation', 'max'),
+            "manage_node_types": ('manage_node_types', lambda x: merge_arrays(x)),
+            "events": ('events', lambda x: merge_arrays(x)),
+            "canonical_facts": ('canonical_facts', lambda x: merge_json_sets(x)),
+            "facts": ('facts', lambda x: merge_json_sets(x)),
+        }
+
+        # Now pass this dictionary into .agg()
+        ccsp_report_dataframe = (
+            dataframe
+            .groupby("host_name", dropna=False)
+            .agg(**agg_dict)
+        )
+
+        # Convert arrays and dict fields into string, so they can be rendered into xlsx
+        for col in ['manage_node_types', 'events', 'canonical_facts', 'facts']:
+            ccsp_report_dataframe[col] = ccsp_report_dataframe[col].apply(self.convert_cell)
+
         ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
         columns = [
             'host_name',
@@ -245,6 +336,9 @@ class Base:
             'first_automation',
             'last_automation',
         ]
+        if managed_node_type == "indirect":
+            columns += ['manage_node_types', 'canonical_facts', 'facts', 'events']
+
         if mode == "by_organization":
             # Filter some columns out based on mode
             columns = [col for col in columns if col not in ['organizations']]
@@ -260,6 +354,14 @@ class Base:
             'first_automation': "First\nautomation",
             'last_automation': "Last\nautomation",
         }
+        if managed_node_type == "indirect":
+            labels.update({
+                "manage_node_types": "Manage\nNode\nTypes",
+                "canonical_facts": "Canonical\nFacts",
+                "facts": "Facts",
+                "events": "Events",
+            })
+
         labels = {k:v for k, v in labels.items() if k in columns}
         ccsp_report_dataframe = ccsp_report_dataframe.rename(
             columns=labels

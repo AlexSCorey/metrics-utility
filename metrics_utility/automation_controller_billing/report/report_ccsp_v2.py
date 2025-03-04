@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 from metrics_utility.automation_controller_billing.report.base import Base
 
-from metrics_utility.metric_utils import INCLUDE_INDIRECT, DIRECT, INDIRECT
+from metrics_utility.metric_utils import DIRECT, INDIRECT
 
 class ReportCCSPv2(Base):
     # BLACK_COLOR_HEX = "00000000"
@@ -115,6 +115,8 @@ class ReportCCSPv2(Base):
         job_host_summary_dataframe = self.dataframe[0]
         events_dataframe = self.dataframe[1]
         events_dataframe = self._fix_event_host_names(job_host_summary_dataframe, events_dataframe)
+        # TODO: also apply organization filter
+        scope_dataframe = self.dataframe[2]
 
         job_host_summary_dataframe, events_dataframe = self._apply_filter(job_host_summary_dataframe, events_dataframe)
 
@@ -142,26 +144,33 @@ class ReportCCSPv2(Base):
             self._build_data_section_usage_by_job(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
-        if "managed_nodes" in self.optional_report_sheets():
-            # Determine the function to use
-            if "managed_nodes_by_organizations" in self.optional_report_sheets():
-                func = self._build_data_section_usage_by_node_with_org_details
-            else:
-                func = self._build_data_section_usage_by_node
+        # Determine the function to use for managed nodes
+        if "managed_nodes_by_organizations" in self.optional_report_sheets():
+            func = self._build_data_section_usage_by_node_with_org_details
+        else:
+            func = self._build_data_section_usage_by_node
 
+        if "managed_nodes" in self.optional_report_sheets():
             # Sheet with list of managed nodes
             self.wb.create_sheet(title="Managed nodes")
             ws = self.wb.worksheets[sheet_index]
-            directs = job_host_summary_dataframe[job_host_summary_dataframe['device_type'] == DIRECT]
-            func(1, ws, directs)
+            directs = job_host_summary_dataframe[job_host_summary_dataframe['managed_node_type'] == DIRECT]
+            func(1, ws, directs, managed_node_type="direct")
             sheet_index += 1
 
-            if INCLUDE_INDIRECT:
-                self.wb.create_sheet(title="Indirectly Managed nodes")
-                ws = self.wb.worksheets[sheet_index]
-                indirects = job_host_summary_dataframe[job_host_summary_dataframe['device_type'] == INDIRECT]
-                func(1, ws, indirects)
-                sheet_index += 1
+        if "indirectly_managed_nodes" in self.optional_report_sheets():
+            self.wb.create_sheet(title="Indirectly Managed nodes")
+            ws = self.wb.worksheets[sheet_index]
+            indirects = job_host_summary_dataframe[job_host_summary_dataframe['managed_node_type'] == INDIRECT]
+            func(1, ws, indirects, managed_node_type="indirect")
+            sheet_index += 1
+
+        if "inventory_scope" in self.optional_report_sheets():
+            self.wb.create_sheet(title="Inventory Scope")
+            ws = self.wb.worksheets[sheet_index]
+            scope = scope_dataframe
+            self._build_data_section_scope(1, ws, scope)
+            sheet_index += 1
 
         if "usage_by_organizations" in self.optional_report_sheets():
             # Sheet with usage by org
@@ -224,27 +233,27 @@ class ReportCCSPv2(Base):
 
         agg_dict = {
             "job_runs": ("job_remote_id_install_uuid", "nunique"),
-            # Only count host_name if the device_type is "DIRECT"
+            # Only count host_name if the managed_node_type is "DIRECT"
             "host_runs_unique": (
                 "host_name",
-                lambda x: x[dataframe.loc[x.index, "device_type"] == DIRECT].nunique()
+                lambda x: x[dataframe.loc[x.index, "managed_node_type"] == DIRECT].nunique()
             ),
             "host_runs": (
                 "host_name",
-                lambda x: x[dataframe.loc[x.index, "device_type"] == DIRECT].count()
+                lambda x: x[dataframe.loc[x.index, "managed_node_type"] == DIRECT].count()
             ),
             "task_runs": ("task_runs", "sum"),
         }
 
         # Add the INDIRECT aggregations only if the condition is met
-        if INCLUDE_INDIRECT:
+        if "indirectly_managed_nodes" in self.optional_report_sheets():
             agg_dict["indirect_host_runs_unique"] = (
                 "host_name",
-                lambda x: x[dataframe.loc[x.index, "device_type"] == INDIRECT].nunique()
+                lambda x: x[dataframe.loc[x.index, "managed_node_type"] == INDIRECT].nunique()
             )
             agg_dict["indirect_host_runs"] = (
                 "host_name",
-                lambda x: x[dataframe.loc[x.index, "device_type"] == INDIRECT].count()
+                lambda x: x[dataframe.loc[x.index, "managed_node_type"] == INDIRECT].count()
             )
 
         # Now pass this dictionary into .agg()
@@ -267,7 +276,7 @@ class ReportCCSPv2(Base):
             ]
         )
 
-        if not INCLUDE_INDIRECT:
+        if "indirectly_managed_nodes" not in self.optional_report_sheets():
             ccsp_report_dataframe.drop(['indirect_host_runs_unique', 'indirect_host_runs'], axis=1, inplace=True)
 
         ccsp_report_dataframe = ccsp_report_dataframe.rename(

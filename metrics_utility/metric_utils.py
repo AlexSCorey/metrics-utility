@@ -5,7 +5,8 @@ def get_optional_collectors():
 
 environs = get_optional_collectors()
 
-INCLUDE_INDIRECT = ('indirect_nodes' in environs)
 DIRECT = 0
 INDIRECT = 1
 # later also EDGE = 2
+
+MANAGED_NODE_TYPES = {DIRECT: "DIRECT", INDIRECT: "INDIRECT"}

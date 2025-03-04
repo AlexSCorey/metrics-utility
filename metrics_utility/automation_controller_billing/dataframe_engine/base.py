@@ -37,6 +37,51 @@ def list_dates(start_date, end_date, granularity):
 
     return dates_arr
 
+# For JSON/dict columns: update one dict with the other (later values overwrite earlier ones)
+def combine_json(json1, json2):
+    merged = {}
+    if isinstance(json1, dict):
+        merged.update(json1)
+    if isinstance(json2, dict):
+        merged.update(json2)
+    return merged
+
+# For set columns: take the union of the two sets
+def combine_set(set1, set2):
+    """
+    Combine two collections (set or list) into a single set of unique items.
+    If an input is a list, it is first converted to a set.
+    If an input is not a list or a set, it is treated as empty.
+    """
+    # Convert to set if input is a list; otherwise, if not a set, default to an empty set.
+    if isinstance(set1, list):
+        set1 = set(set1)
+    elif not isinstance(set1, set):
+        set1 = set()
+
+    if isinstance(set2, list):
+        set2 = set(set2)
+    elif not isinstance(set2, set):
+        set2 = set()
+
+    # Return the union of both sets.
+    return set1.union(set2)
+
+# Helper function to combine two JSON values.
+# For each key, it builds a set of non-null, non-empty values from both inputs.
+def combine_json_values(val1, val2):
+    merged = {}
+    for d in [val1, val2]:
+        if isinstance(d, dict):
+            for key, value in d.items():
+                if value is not None and value != "":
+                    if isinstance(value, set):
+                        merged.setdefault(key, set()).update(value)
+                    else:
+                        merged.setdefault(key, set()).add(value)
+
+    return merged
+
 class Base:
     LOG_PREFIX = "[AAPBillingReport] "
 
@@ -86,6 +131,12 @@ class Base:
                 df[col] = df[[f"{col}_x", f"{col}_y"]].min(axis=1)
             elif operations.get(col) == "max":
                 df[col] = df[[f"{col}_x", f"{col}_y"]].max(axis=1)
+            elif operations.get(col) == "set_merge":
+                df[col] = df.apply(lambda row: combine_set(row.get(f"{col}_x"), row.get(f"{col}_y")), axis=1)
+            elif operations.get(col) == "dict_merge":
+                df[col] = df.apply(lambda row: combine_json(row.get(f"{col}_x"), row.get(f"{col}_y")), axis=1)
+            elif operations.get(col) == "dict_set_merge":
+                df[col] = df.apply(lambda row: combine_json_values(row.get(f"{col}_x"), row.get(f"{col}_y")), axis=1)
             else:
                 df[col] = df[[f"{col}_x", f"{col}_y"]].sum(axis=1)
             del df[f"{col}_x"]
