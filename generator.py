@@ -253,6 +253,7 @@ Environment vars:
                 self.concat('main_host', data['main_host'])
                 self.concat('main_indirectmanagednodeaudit', data['indirect_nodes'])
                 self.concat('main_jobevent', data['main_jobevent'])
+                self.concat('collection_status', data['data_collection_status'])
                 self.config_json = data['config']
 
         if self.verbose:

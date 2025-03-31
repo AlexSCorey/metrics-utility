@@ -17,6 +17,7 @@ class Base:
     RED_COLOR_HEX = 'FF0000'
     LIGHT_BLUE_COLOR_HEX = 'd4eaf3'
     GREEN_COLOR_HEX = '92d050'
+    YELLOW_WARNING_COLOR_HEX = 'FFCC17'
     FONT = 'Arial'
     PRICE_FORMAT = '$#,##0.00'
     HOST_NAME = 'Host name'
@@ -437,6 +438,53 @@ class Base:
         return current_row + row_counter
 
     def _build_data_section_usage_by_modules(self, current_row, ws, dataframe):
+        for key, value in self.config['data_column_widths'].items():
+            ws.column_dimensions[get_column_letter(key)].width = value
+
+        header_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX, bold=True)
+        value_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX)
+
+        ccsp_report_dataframe = dataframe.groupby(['module_name'], dropna=False).agg(
+            host_runs_unique=('host_name', 'nunique'),
+            host_runs=('host_composite_id', 'nunique'),
+            task_runs=('task_runs', 'sum'),
+            duration=('duration', 'sum'),
+        )
+        # Rename the columns based on the template
+        ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
+
+        ccsp_report_dataframe = ccsp_report_dataframe.rename(
+            columns={
+                'module_name': 'Module name',
+                'host_runs_unique': self.HOST_RUNS_UNIQUE,
+                'host_runs': self.HOST_RUNS,
+                'task_runs': self.NUM_OF_TASKS_OR_RUNS,
+                'duration': self.DURATION,
+            }
+        )
+
+        row_counter = 0
+        rows = dataframe_to_rows(ccsp_report_dataframe, index=False)
+        for r_idx, row in enumerate(rows, current_row):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+
+                if row_counter == 0:
+                    # set header style
+                    cell.font = header_font
+                    rd = ws.row_dimensions[r_idx]
+                    rd.height = 25
+                else:
+                    # set value style
+                    cell.font = value_font
+
+            row_counter += 1
+
+        return current_row + row_counter
+
+
+    def _build_data_section_data_gathering_status(self, current_row, ws, dataframe):
         for key, value in self.config['data_column_widths'].items():
             ws.column_dimensions[get_column_letter(key)].width = value
 

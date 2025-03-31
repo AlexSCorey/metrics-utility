@@ -1,6 +1,7 @@
 from metrics_utility.automation_controller_billing.dataframe_engine.dataframe_content_usage import DataframeContentUsage
 from metrics_utility.automation_controller_billing.dataframe_engine.dataframe_inventory_scope import DataframeInventoryScope
 from metrics_utility.automation_controller_billing.dataframe_engine.dataframe_jobhost_summary_usage import DataframeJobhostSummaryUsage
+from metrics_utility.automation_controller_billing.dataframe_engine.dataframe_collection_status import DataframeCollectionStatus
 from metrics_utility.automation_controller_billing.dataframe_engine.db_dataframe_host_metric import DBDataframeHostMetric
 from metrics_utility.exceptions import NotSupportedFactory
 
@@ -21,10 +22,12 @@ class Factory:
                 self._get_dataframe_inventory_scope().build_dataframe(),
             )
         elif self.report_type == 'CCSPv2':
+            breakpoint
             return (
                 self._get_dataframe_jobhost_summary_usage().build_dataframe(),
                 self._get_dataframe_content_usage().build_dataframe(),
                 self._get_dataframe_inventory_scope().build_dataframe(),
+                self._get_dataframe_collection_status().build_dataframe()
             )
         elif self.report_type == 'RENEWAL_GUIDANCE':
             return (self._get_db_dataframe_host_metric_usage().build_dataframe(),)
@@ -32,6 +35,9 @@ class Factory:
             return (self._get_dataframe_jobhost_summary_usage().build_dataframe(), self._get_dataframe_content_usage().build_dataframe())
         else:
             raise NotSupportedFactory(f'Factory for {self.ship_target} not supported')
+
+    def _get_dataframe_collection_status(self):
+        return DataframeCollectionStatus(extractor=self.extractor, month=self.month, extra_params=self.extra_params)
 
     def _get_dataframe_jobhost_summary_usage(self):
         # Return default S3 loader

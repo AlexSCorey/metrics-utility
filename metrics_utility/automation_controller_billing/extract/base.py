@@ -33,6 +33,14 @@ CSV_SHEETS = {
         'usage_by_organizations',
         'usage_by_roles',
     ],
+    'data_collection_status': [
+        'data_collection_status',
+        'since',
+        'until',
+        'file_name',
+        'status',
+        'elapsed'
+    ]
 }
 
 
@@ -50,6 +58,7 @@ class Base:
         empty_dataframe = pd.DataFrame([{}])
         needed_data = {
             'config': config,
+            'data_collection_status': empty_dataframe,
             'job_host_summary': empty_dataframe,
             'indirect_nodes': empty_dataframe,
             'main_jobevent': empty_dataframe,
@@ -68,6 +77,8 @@ class Base:
         if self.csv_enabled('main_host'):
             needed_data['main_host'] = self.build_data_batch(temp_dir, 'main_host')
 
+        if self.csv_enabled('data_collection_status'):
+            needed_data['data_collection_status']= self.build_data_batch(temp_dir, "data_collection_status")
         return needed_data
 
     def build_data_batch(self, temp_dir, file_name):
@@ -90,6 +101,7 @@ class Base:
         If none found, give it the default CCSP report sheet options.
         Returns a boolean so we know which sheets to provide in the report.
         """
+        # breakpoint()
         sheet_options = self.extra_params.get('optional_sheets')
         return bool(set(sheet_options) & set(sheets_required))
 

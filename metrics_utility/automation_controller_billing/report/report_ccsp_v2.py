@@ -96,6 +96,7 @@ class ReportCCSPv2(Base):
         # Fix host names in the event data, to take in account the variables
         job_host_summary_dataframe = self.dataframe[0]
         events_dataframe = self.dataframe[1]
+
         events_dataframe = self._fix_event_host_names(job_host_summary_dataframe, events_dataframe)
         # TODO: also apply organization filter
         scope_dataframe = self.dataframe[2]
@@ -107,7 +108,11 @@ class ReportCCSPv2(Base):
 
         # First sheet index
         sheet_index = 0
-
+        if 'data_gather_status' in self.optional_report_sheets():
+            self.wb.create_sheet(title='Data gathering status')
+            ws = self.wb.worksheets[sheet_index]
+            self._build_data_section_collection_status(1, ws, job_host_summary_dataframe, events_dataframe)
+            sheet_index += 1
         if 'ccsp_summary' in self.optional_report_sheets():
             self.wb.create_sheet(title='Usage Reporting')
             ws = self.wb.worksheets[sheet_index]
@@ -161,6 +166,8 @@ class ReportCCSPv2(Base):
             self._build_data_section_usage_by_org(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
+
+
         if events_dataframe is not None:
             if 'usage_by_collections' in self.optional_report_sheets():
                 # Sheet with usage by collections
@@ -197,6 +204,94 @@ class ReportCCSPv2(Base):
 
         return self.wb
 
+    def _build_data_section_collection_status(self, current_row, ws, dataframe, events_dataframe):
+        for key, value in self.config['data_column_widths'].items():
+            ws.column_dimensions[get_column_letter(key)].width = value
+
+        success_background = PatternFill('solid', fgColor=self.GREEN_COLOR_HEX)
+        warning_background = PatternFill('solid', fgColor=self.YELLOW_WARNING_COLOR_HEX)
+        danger_background = PatternFill('solid', fgColor=self.RED_COLOR_HEX)
+        # dataframe['hosts'] = dataframe.index.map(lambda x: print(type(x)) and events_dataframe.loc[x, 'host_name'])
+        # dataframe['since'] = lambda x: dataframe.loc[x, 'since'] - dataframe.loc[x - 1, 'until']
+        # dataframe['num_failed_tasks'] = lambda x: (events_dataframe.loc[x, 'failed'] == True)
+        # dataframe['elapsed'] = lambda x: dataframe.loc[x, 'elapsed']
+        # dataframe['status'] = lambda x: dataframe.loc[x, 'status']
+        # agg_dict={
+        #   'hosts':('hosts','nunique'),
+        #   # 'since': ('since','diff'),
+        #   'failed_tasks': ('num_failed_tasks', 'sum'),
+        #   'elapsed':('elapsed', lambda x: dataframe.loc[x, 'elapsed']),
+        #   'status':('status', lambda x: dataframe.loc[x, 'status'] )
+        # }
+
+        # ccsp_report_dataframe = dataframe.groupby('hosts', dropna=False)
+        # ccsp_report_dataframe = ccsp_report_dataframe.agg(**agg_dict)
+
+
+
+
+
+        # Fix column assignments (apply functions properly)
+        dataframe['hosts'] = dataframe.index.map(lambda x: events_dataframe.loc[x, 'host_name'])
+        # dataframe['num_failed_tasks'] = dataframe.index.map(lambda x: events_dataframe.loc[x, 'failed'] == True)
+        # dataframe['elapsed'] = dataframe.index.map(lambda x: dataframe.loc[x, 'elapsed'])
+        # dataframe['status'] = dataframe.index.map(lambda x: dataframe.loc[x, 'status'])
+
+        # Fix aggregation dictionary
+        agg_dict = {
+            'hosts': ('hosts', 'nunique'),
+            # 'failed_tasks': ('num_failed_tasks', 'sum'),
+            # 'elapsed': ('elapsed', 'sum'),
+            # 'status': ('status', lambda x: x.mode()[0] if not x.isna().all() else 'Unknown')
+        }
+
+        # Fix groupby and aggregation
+        ccsp_report_dataframe = dataframe.groupby('hosts', dropna=False).agg(**agg_dict)
+
+        # ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
+        # ccsp_report_dataframe = ccsp_report_dataframe.reindex(
+        #     columns=['hosts', 'since', 'elapsed', 'status', 'failed_tasks']
+        # )
+
+        ccsp_report_dataframe = ccsp_report_dataframe.rename(
+          columns={
+              'hosts': 'Hosts',
+              # 'since': 'Time since last data\ncollection',
+              'failed_tasks': 'Number of failed\ntasks',
+              'elapsed':'Elapsed',
+              'status':'Status'
+          }
+        )
+
+        col_index = None
+        row_counter = 0
+        for col in ws.iter_cols(min_row=1, max_row=1):  # Only check the first row (headers)
+            if col[0].value == "since":
+                col_index = col[0].column  # Get the column index (1-based)
+                break
+        rows = ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_index, max_col=col_index)
+        for row in rows:
+          for cell in row:
+              if row_counter == 0:
+                  continue
+              values = [row[0] for row in rows]
+              avg = sum(values) / len(values)
+              if cell.value >= 5 * avg:
+                  cell.fill = danger_background
+              if cell.value >= 2.5 * avg and cell.value < 5 * avg:
+                  cell.fill = warning_background
+              if cell.value < 2.5 * avg:
+                  cell.fill = success_background
+
+          row_counter += 1
+
+        return current_row + row_counter
+
+
+
+
+
+
     def _build_data_section_usage_by_org(self, current_row, ws, dataframe):
         for key, value in self.config['data_column_widths'].items():
             ws.column_dimensions[get_column_letter(key)].width = value
@@ -204,8 +299,8 @@ class ReportCCSPv2(Base):
         header_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX, bold=True)
         value_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX)
 
+        # breakpoint()
         dataframe['job_remote_id_install_uuid'] = list(zip(dataframe['job_remote_id'], dataframe['install_uuid']))
-
         agg_dict = {
             'job_runs': ('job_remote_id_install_uuid', 'nunique'),
             # Only count host_name if the managed_node_type is "DIRECT"
