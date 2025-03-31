@@ -75,7 +75,10 @@ jobs:
           sed -i '/PASSWORD/s/mypassword/awx/' mock_awx/settings/__init__.py
 
       - name: Run pytest
-        run: uv run pytest -s -v  --cov=. --cov-report=xml
+        run: uv run pytest -s -v  --cov=. --cov-report=xml:coverage.xml
+
+      - name: Check if coverage report exists
+        run: ls -l coverage.xml
 
       - name: Send code coverage report to Sonar Cloud
         uses: SonarSource/sonarqube-scan-action@v4
