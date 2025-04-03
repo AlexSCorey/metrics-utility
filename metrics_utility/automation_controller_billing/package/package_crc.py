@@ -1,11 +1,12 @@
 import json
 import os
 
-import insights_analytics_collector as base
 import requests
 
 from awx.main.utils import get_awx_http_client_headers
 from django.conf import settings
+
+import metrics_utility.base as base
 
 from metrics_utility.exceptions import FailedToUploadPayload
 
@@ -46,7 +47,7 @@ class PackageCRC(base.Package):
         return self.SHIPPING_AUTH_SERVICE_ACCOUNT
 
     def is_shipping_configured(self):
-        # TODO: move to insights-analytics-collector
+        # TODO: move to base
         ret = super()
         if ret is False:
             return False
@@ -70,7 +71,7 @@ class PackageCRC(base.Package):
         return True
 
     def _send_data(self, url, files, session):
-        # TODO: move to insights-analytics-collector
+        # TODO: move to base
         if self.shipping_auth_mode() == self.SHIPPING_AUTH_SERVICE_ACCOUNT:
             sso_url = self.get_sso_url()
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
