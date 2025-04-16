@@ -3,11 +3,12 @@
 ######################################
 import time
 
+from datetime import timedelta
+
 import pandas as pd
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from metrics_utility.automation_controller_billing.report.base import Base
@@ -15,15 +16,6 @@ from metrics_utility.metric_utils import DIRECT, INDIRECT
 
 
 class ReportCCSPv2(Base):
-    # BLACK_COLOR_HEX = "00000000"
-    # WHITE_COLOR_HEX = "00FFFFFF"
-    # BLUE_COLOR_HEX = "000000FF"
-    # RED_COLOR_HEX = "FF0000"
-    # LIGHT_BLUE_COLOR_HEX = "d4eaf3"
-    # GREEN_COLOR_HEX = "92d050"
-    # FONT = "Arial"
-    # PRICE_FORMAT = '$#,##0.00'
-
     def __init__(self, dataframe, report_period, extra_params):
         self.wb = Workbook()
 
@@ -78,9 +70,12 @@ class ReportCCSPv2(Base):
 
         default_data_column_widths = {1: 40, 2: 20, 3: 20, 4: 20, 5: 20, 6: 20}
 
+        default_status_column_widths = {1: 36, 2: 20, 3: 20, 4: 36, 5: 15, 6: 15, 7: 20}
+
         self.config['sku_description'] = default_sku_description
         self.config['column_widths'] = default_column_widths
         self.config['data_column_widths'] = default_data_column_widths
+        self.config['status_column_widths'] = default_status_column_widths
 
     def _apply_filter(self, job_host_summary_dataframe, events_dataframe):
         if self.extra_params['report_organization_filter'] is not None:
@@ -93,13 +88,14 @@ class ReportCCSPv2(Base):
         return job_host_summary_dataframe, events_dataframe
 
     def build_spreadsheet(self):
-        # Fix host names in the event data, to take in account the variables
         job_host_summary_dataframe = self.dataframe[0]
         events_dataframe = self.dataframe[1]
+        scope_dataframe = self.dataframe[2]
+        status_dataframe = self.dataframe[3]
+
+        # Fix host names in the event data, to take in account the variables
         events_dataframe = self._fix_event_host_names(job_host_summary_dataframe, events_dataframe)
         # TODO: also apply organization filter
-        scope_dataframe = self.dataframe[2]
-
         job_host_summary_dataframe, events_dataframe = self._apply_filter(job_host_summary_dataframe, events_dataframe)
 
         # Create the workbook and worksheets
@@ -109,9 +105,7 @@ class ReportCCSPv2(Base):
         sheet_index = 0
 
         if 'ccsp_summary' in self.optional_report_sheets():
-            self.wb.create_sheet(title='Usage Reporting')
-            ws = self.wb.worksheets[sheet_index]
-            self._init_dimensions(ws)
+            ws = self.add_sheet('Usage Reporting', sheet_index, self.config['column_widths'])
             current_row = self._build_heading_h1(1, ws)
             current_row = self._build_header(current_row, ws)
             current_row = self._build_po_number(current_row, ws)
@@ -120,9 +114,7 @@ class ReportCCSPv2(Base):
             sheet_index += 1
 
         if 'jobs' in self.optional_report_sheets():
-            # Sheet with usage by org
-            self.wb.create_sheet(title='Jobs')
-            ws = self.wb.worksheets[sheet_index]
+            ws = self.add_sheet('Jobs', sheet_index, self.config['data_column_widths'])
             self._build_data_section_usage_by_job(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
@@ -134,15 +126,13 @@ class ReportCCSPv2(Base):
 
         if 'managed_nodes' in self.optional_report_sheets():
             # Sheet with list of managed nodes
-            self.wb.create_sheet(title='Managed nodes')
-            ws = self.wb.worksheets[sheet_index]
+            ws = self.add_sheet('Managed nodes', sheet_index, self.config['data_column_widths'])
             directs = job_host_summary_dataframe[job_host_summary_dataframe['managed_node_type'] == DIRECT]
             func(1, ws, directs, managed_node_type='direct')
             sheet_index += 1
 
         if 'indirectly_managed_nodes' in self.optional_report_sheets():
-            self.wb.create_sheet(title='Indirectly Managed nodes')
-            ws = self.wb.worksheets[sheet_index]
+            ws = self.add_sheet('Indirectly Managed nodes', sheet_index, self.config['data_column_widths'])
             indirects = job_host_summary_dataframe[job_host_summary_dataframe['managed_node_type'] == INDIRECT]
             ## This function creates the correct columns for this sheet.  Using the func variable from above
             ## can result in the wrong columns for this sheet if `managed_nodes_by_organization`
@@ -151,38 +141,33 @@ class ReportCCSPv2(Base):
             sheet_index += 1
 
         if 'inventory_scope' in self.optional_report_sheets():
-            self.wb.create_sheet(title='Inventory Scope')
-            ws = self.wb.worksheets[sheet_index]
+            ws = self.add_sheet('Inventory Scope', sheet_index, self.config['data_column_widths'])
             scope = scope_dataframe
             self._build_data_section_scope(1, ws, scope)
             sheet_index += 1
 
         if 'usage_by_organizations' in self.optional_report_sheets():
             # Sheet with usage by org
-            self.wb.create_sheet(title='Usage by organizations')
-            ws = self.wb.worksheets[sheet_index]
+            ws = self.add_sheet('Usage by organizations', sheet_index, self.config['data_column_widths'])
             self._build_data_section_usage_by_org(1, ws, job_host_summary_dataframe)
             sheet_index += 1
 
         if events_dataframe is not None:
             if 'usage_by_collections' in self.optional_report_sheets():
                 # Sheet with usage by collections
-                self.wb.create_sheet(title='Usage by collections')
-                ws = self.wb.worksheets[sheet_index]
+                ws = self.add_sheet('Usage by collections', sheet_index, self.config['data_column_widths'])
                 self._build_data_section_usage_by_collections(1, ws, events_dataframe)
                 sheet_index += 1
 
             if 'usage_by_roles' in self.optional_report_sheets():
                 # Sheet with usage by roles
-                self.wb.create_sheet(title='Usage by roles')
-                ws = self.wb.worksheets[sheet_index]
+                ws = self.add_sheet('Usage by roles', sheet_index, self.config['data_column_widths'])
                 self._build_data_section_usage_by_roles(1, ws, events_dataframe)
                 sheet_index += 1
 
             if 'usage_by_modules' in self.optional_report_sheets():
                 # Sheet with usage by modules
-                self.wb.create_sheet(title='Usage by modules')
-                ws = self.wb.worksheets[sheet_index]
+                ws = self.add_sheet('Usage by modules', sheet_index, self.config['data_column_widths'])
                 self._build_data_section_usage_by_modules(1, ws, events_dataframe)
                 sheet_index += 1
 
@@ -190,20 +175,236 @@ class ReportCCSPv2(Base):
             # Sheet with list of managed nodes by organization, this will generate multiple tabs
             organization_names = sorted(job_host_summary_dataframe['organization_name'].unique())
             for organization_name in organization_names:
-                self.wb.create_sheet(title=organization_name)
-                ws = self.wb.worksheets[sheet_index]
+                ws = self.add_sheet(organization_name, sheet_index, self.config['data_column_widths'])
 
                 # Filter the data for a certain organization
                 filtered_job_host_summary_dataframe = job_host_summary_dataframe[job_host_summary_dataframe['organization_name'] == organization_name]
                 self._build_data_section_usage_by_node(1, ws, filtered_job_host_summary_dataframe, mode='by_organization')
                 sheet_index += 1
 
+        if 'data_collection_status' in self.optional_report_sheets():
+            ws = self.add_sheet('Data collection status', sheet_index, self.config['status_column_widths'])
+            current_row = self._build_data_section_collection_missing(1, ws, status_dataframe)
+            current_row += 1  # gap
+            self._build_data_section_collection_status(current_row, ws, status_dataframe)
+            sheet_index += 1
+
         return self.wb
 
-    def _build_data_section_usage_by_org(self, current_row, ws, dataframe):
-        for key, value in self.config['data_column_widths'].items():
-            ws.column_dimensions[get_column_letter(key)].width = value
+    def _build_table(self, current_row, ws, rows):
+        row_counter = 0
 
+        for r_idx, row in enumerate(rows, current_row):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+            row_counter += 1
+
+        return current_row + row_counter
+
+    def _build_data_section_collection_missing(self, current_row, ws, df):
+        """builds a table showing any gaps not covered by any since-until collection interval"""
+
+        # skip failed collects
+        df = df[df['status'] == 'ok']
+
+        # find gaps between until -> next since
+        df = df.sort_values(['file_name', 'collection_start_timestamp']).reset_index(drop=True)
+        df['next_since'] = df.groupby('file_name')['since'].shift(-1)
+        df['gap'] = df['next_since'] - df['until']
+
+        # skip if under 2 seconds
+        threshold = timedelta(seconds=2)
+        dataframe = df[df['gap'] > threshold].copy()
+
+        dataframe = dataframe[['file_name', 'until', 'next_since', 'gap']]
+        dataframe = dataframe.rename(
+            columns={
+                'file_name': 'CSV filename',
+                'until': 'Missing from',
+                'next_since': 'Missing until',
+                'gap': 'Gap in seconds',
+            }
+        )
+
+        rows = dataframe_to_rows(dataframe, index=False)
+        return self._build_table(current_row, ws, rows)
+
+    def _build_data_section_collection_status(self, first_row, ws, df):
+        # time difference between the current and previous row with the same file_name & sort
+        df = df.sort_values(['file_name', 'collection_start_timestamp']).reset_index(drop=True)
+        df['time_diff'] = df.groupby('file_name')['collection_start_timestamp'].diff()
+        df = df.sort_values('collection_start_timestamp').reset_index(drop=True)
+
+        median_diff = df['time_diff'].median()
+
+        dataframe = df.rename(
+            columns={
+                'collection_start_timestamp': 'Collection timestamp',
+                'since': 'Filter since',
+                'until': 'Filter until',
+                'file_name': 'CSV filename',
+                'status': 'Status',
+                'elapsed': 'Elapsed',
+                'time_diff': 'Time since\nprevious collection',  # col_index
+            }
+        )
+
+        rows = dataframe_to_rows(dataframe, index=False)
+        next_row = self._build_table(first_row, ws, rows)
+
+        # apply styling to highlight unusual collection intervals
+
+        success_background = PatternFill('solid', fgColor=self.GREEN_COLOR_HEX)
+        warning_background = PatternFill('solid', fgColor=self.YELLOW_COLOR_HEX)
+        danger_background = PatternFill('solid', fgColor=self.RED_COLOR_HEX)
+
+        threshold_warning = 2 * median_diff
+        threshold_danger = 3 * median_diff
+
+        col_index = df.columns.to_list().index('time_diff')
+
+        rows = ws.iter_rows(min_row=first_row + 1, max_row=next_row, min_col=col_index + 1, max_col=col_index + 1)
+        for row in rows:
+            for cell in row:
+                if cell.value is None or pd.isnull(cell.value):
+                    continue
+                if cell.value >= threshold_danger:
+                    cell.fill = danger_background
+                elif cell.value >= threshold_warning:
+                    cell.fill = warning_background
+                else:
+                    cell.fill = success_background
+
+        return next_row
+
+    def _build_data_section_usage_by_node_with_org_details(self, current_row, ws, dataframe, mode=None, managed_node_type=None):
+        header_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX, bold=True)
+        value_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX)
+
+        # Rename the columns based on the template
+        ccsp_report_dataframe = dataframe.groupby('host_name', dropna=False).agg(
+            organizations=('organization_name', 'nunique'),
+            host_runs=('host_name', 'count'),
+            task_runs=('task_runs', 'sum'),
+            first_automation=('first_automation', 'min'),
+            last_automation=('last_automation', 'max'),
+        )
+        ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
+        columns = [
+            'host_name',
+            'organizations',
+            'host_runs',
+            'task_runs',
+            'first_automation',
+            'last_automation',
+        ]
+        if mode == 'by_organization':
+            # Filter some columns out based on mode
+            columns = [col for col in columns if col not in ['organizations']]
+
+        ccsp_report_dataframe = ccsp_report_dataframe.reindex(columns=columns)
+
+        # Create dataframe with hostname and orgs as columns, having last automation for each host
+        pivoted_dataframe = dataframe.pivot_table(
+            index='host_name',
+            columns='organization_name',
+            values='last_automation',
+            aggfunc='max',  # You can use 'max', 'min', 'mean', etc., depending on your needs
+        )
+
+        # Set index on host_name for join
+        ccsp_report_dataframe.set_index('host_name', inplace=True)
+
+        # Join the list of orgs to the pivoted_dataframe having org last updated as columns
+        ccsp_report_dataframe = ccsp_report_dataframe.join(pivoted_dataframe, how='left')
+        ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
+
+        labels = {
+            'host_name': self.HOST_NAME,
+            'organizations': 'Automated by\norganizations',
+            'host_runs': self.JOB_RUNS,  # Job runs is the same as host_runs, Non-unique managed nodes automated
+            'task_runs': self.NUM_OF_TASKS_OR_RUNS,
+            'first_automation': 'First\nautomation',
+            'last_automation': 'Last\nautomation',
+        }
+        labels = {k: v for k, v in labels.items() if k in columns}
+        ccsp_report_dataframe = ccsp_report_dataframe.rename(columns=labels)
+
+        row_counter = 0
+        rows = dataframe_to_rows(ccsp_report_dataframe, index=False)
+        for r_idx, row in enumerate(rows, current_row):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+
+                if row_counter == 0:
+                    # set header style
+                    cell.font = header_font
+                    rd = ws.row_dimensions[r_idx]
+                    rd.height = 25
+                else:
+                    # set value style
+                    cell.font = value_font
+
+            row_counter += 1
+
+        return current_row + row_counter
+
+    def _build_data_section_usage_by_job(self, current_row, ws, dataframe):
+        header_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX, bold=True)
+        value_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX)
+
+        dataframe['job_remote_id_install_uuid'] = list(zip(dataframe['job_remote_id'], dataframe['install_uuid']))
+
+        # Rename the columns based on the template
+        ccsp_report_dataframe = dataframe.groupby(['organization_name', 'job_template_name'], dropna=False).agg(
+            job_runs=('job_remote_id_install_uuid', 'nunique'),
+            host_runs_unique=('host_name', 'nunique'),
+            host_runs=('host_name', 'count'),
+            task_runs=('task_runs', 'sum'),
+            first_run=('job_created', 'min'),
+            last_run=('job_created', 'max'),
+        )
+        ccsp_report_dataframe = ccsp_report_dataframe.reset_index()
+        ccsp_report_dataframe = ccsp_report_dataframe.reindex(
+            columns=['job_template_name', 'organization_name', 'job_runs', 'host_runs_unique', 'host_runs', 'task_runs', 'first_run', 'last_run']
+        )
+
+        ccsp_report_dataframe = ccsp_report_dataframe.rename(
+            columns={
+                'job_template_name': 'Job template\nname',
+                'organization_name': 'Organization\nname',
+                'job_runs': self.JOB_RUNS,
+                'host_runs_unique': self.HOST_RUNS_UNIQUE,
+                'host_runs': self.HOST_RUNS,
+                'task_runs': self.NUM_OF_TASKS_OR_RUNS,
+                'first_run': 'First\nrun',
+                'last_run': 'Last\nrun',
+            }
+        )
+
+        row_counter = 0
+        rows = dataframe_to_rows(ccsp_report_dataframe, index=False)
+        for r_idx, row in enumerate(rows, current_row):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+
+                if row_counter == 0:
+                    # set header style
+                    cell.font = header_font
+                    rd = ws.row_dimensions[r_idx]
+                    rd.height = 25
+                else:
+                    # set value style
+                    cell.font = value_font
+
+            row_counter += 1
+
+        return current_row + row_counter
+
+    def _build_data_section_usage_by_org(self, current_row, ws, dataframe):
         header_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX, bold=True)
         value_font = Font(name=self.FONT, size=10, color=self.BLACK_COLOR_HEX)
 
@@ -264,10 +465,6 @@ class ReportCCSPv2(Base):
             row_counter += 1
 
         return current_row + row_counter
-
-    def _init_dimensions(self, ws):
-        for key, value in self.config['column_widths'].items():
-            ws.column_dimensions[get_column_letter(key)].width = value
 
     def _build_heading_h1(self, current_row, ws):
         # Merge cells and insert the h1 heading

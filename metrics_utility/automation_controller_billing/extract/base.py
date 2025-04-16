@@ -8,6 +8,7 @@ import pandas as pd
 from metrics_utility.debug_utils import print_debug
 
 
+# csv name => [ sheet_names ]
 CSV_SHEETS = {
     'job_host_summary': [
         'ccsp_summary',
@@ -36,6 +37,9 @@ CSV_SHEETS = {
         'usage_by_modules',
         'usage_by_organizations',
         'usage_by_roles',
+    ],
+    'data_collection_status': [
+        'data_collection_status',
     ],
 }
 
@@ -66,11 +70,15 @@ class Base:
         empty_dataframe = pd.DataFrame([{}])
         needed_data = {
             'config': config,
-            'job_host_summary': empty_dataframe,
+            'data_collection_status': empty_dataframe,
             'indirect_nodes': empty_dataframe,
-            'main_jobevent': empty_dataframe,
+            'job_host_summary': empty_dataframe,
             'main_host': empty_dataframe,
+            'main_jobevent': empty_dataframe,
         }
+
+        if self.csv_enabled('data_collection_status'):
+            needed_data['data_collection_status'] = self.build_data_batch(temp_dir, 'data_collection_status')
 
         if self.csv_enabled('job_host_summary'):
             needed_data['job_host_summary'] = self.build_data_batch(temp_dir, 'job_host_summary')
@@ -102,8 +110,7 @@ class Base:
 
     def sheet_enabled(self, sheets_required):
         """
-        Checks for METRICS_UTILITY_OPTIONAL_CCSP_REPORT_SHEETS values and return those values.
-        If none found, give it the default CCSP report sheet options.
+        Checks if any sheets_required item is in METRICS_UTILITY_OPTIONAL_CCSP_REPORT_SHEETS
         Returns a boolean so we know which sheets to provide in the report.
         """
         sheet_options = self.extra_params.get('optional_sheets')
