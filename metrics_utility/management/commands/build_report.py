@@ -68,7 +68,7 @@ class Command(BaseCommand):
 
         # parse params
         opt_month = options.get('month') or None
-        opt_month, month = self._handle_month(opt_month)
+        opt_month, month, next_month = self._handle_month(opt_month)
 
         # Since and ephemenral params are specific to subset of reports
         opt_since = None
@@ -89,6 +89,8 @@ class Command(BaseCommand):
         extra_params['opt_since'] = opt_since
         extra_params['opt_until'] = opt_until
         extra_params['opt_ephemeral'] = opt_ephemeral
+        extra_params['month_since'] = month
+        extra_params['month_until'] = next_month
 
         extractor = ExtractorFactory(ship_target, extra_params).create()
 
@@ -221,4 +223,4 @@ class Command(BaseCommand):
             m = date.strftime('%m')
             month = f'{y}-{m}'
 
-        return month, date
+        return month, date, date + relativedelta(months=1)

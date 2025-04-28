@@ -1,4 +1,4 @@
-from datetime import datetime
+import datetime
 
 import openpyxl
 import pandas
@@ -32,8 +32,6 @@ env_vars = {
 
 file_path = './metrics_utility/test/test_data/reports/2025/02/CCSPv2-2025-02-13--2025-02-13.xlsx'
 
-date_today = datetime.now().strftime('%b %d, %Y')
-
 
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
 @pytest.mark.parametrize(
@@ -65,6 +63,7 @@ def test_command(cleanup):
         validate_usage_by_collections(file_path)
         validate_usage_by_roles(file_path)
         validate_usage_by_modules(file_path)
+        validate_data_collection_status(file_path)
 
     finally:
         workbook.close()
@@ -198,5 +197,68 @@ def validate_usage_by_modules(file_path):
             'Non-unique managed nodes automated': 1,
             'Number of task runs': 1,
             'Unique managed nodes automated': 1,
+        },
+    }
+
+
+def load_data_collection_status(file_path):
+    # find the first empty row - gap between 2 tables
+    sheet_both = pandas.read_excel(file_path, sheet_name='Data collection status')
+    rows = sheet_both.index[sheet_both.isnull().all(axis=1)][0] + 1
+
+    sheet_missing = pandas.read_excel(file_path, sheet_name='Data collection status', nrows=rows)
+    sheet_status = pandas.read_excel(file_path, sheet_name='Data collection status', skiprows=rows + 1)
+
+    return sheet_missing, sheet_status
+
+
+def validate_data_collection_status(file_path):
+    sheet_missing, sheet_status = load_data_collection_status(file_path)
+
+    assert transform_sheet(sheet_missing.to_dict()) == {
+        0: {
+            'CSV filename': 'job_host_summary.csv',
+            'Gap in seconds': datetime.time(11, 49, 17, 200000),
+            'Missing from': Timestamp('2025-02-13 00:00:00'),
+            'Missing until': Timestamp('2025-02-13 11:49:17.200000'),
+        },
+        1: {
+            'CSV filename': 'job_host_summary.csv',
+            'Gap in seconds': datetime.time(11, 10, 42, 798000),
+            'Missing from': Timestamp('2025-02-13 12:49:17.202000'),
+            'Missing until': Timestamp('2025-02-14 00:00:00'),
+        },
+        2: {
+            'CSV filename': 'main_jobevent.csv',
+            'Gap in seconds': datetime.time(11, 49, 17, 200000),
+            'Missing from': Timestamp('2025-02-13 00:00:00'),
+            'Missing until': Timestamp('2025-02-13 11:49:17.200000'),
+        },
+        3: {
+            'CSV filename': 'main_jobevent.csv',
+            'Gap in seconds': datetime.time(11, 10, 42, 798000),
+            'Missing from': Timestamp('2025-02-13 12:49:17.202000'),
+            'Missing until': Timestamp('2025-02-14 00:00:00'),
+        },
+    }
+
+    assert transform_sheet(sheet_status.fillna(value='').to_dict()) == {
+        0: {
+            'CSV filename': 'job_host_summary.csv',
+            'Collection timestamp': Timestamp('2025-02-13 12:49:17.232000'),
+            'Elapsed': 0,
+            'Filter since': Timestamp('2025-02-13 11:49:17.200000'),
+            'Filter until': Timestamp('2025-02-13 12:49:17.202000'),
+            'Status': 'ok',
+            'Time since previous collection': '',
+        },
+        1: {
+            'CSV filename': 'main_jobevent.csv',
+            'Collection timestamp': Timestamp('2025-02-13 12:49:17.248000'),
+            'Elapsed': 0,
+            'Filter since': Timestamp('2025-02-13 11:49:17.200000'),
+            'Filter until': Timestamp('2025-02-13 12:49:17.202000'),
+            'Status': 'ok',
+            'Time since previous collection': '',
         },
     }
