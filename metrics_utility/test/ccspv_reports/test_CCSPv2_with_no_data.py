@@ -19,7 +19,7 @@ env_vars = {
     'METRICS_UTILITY_REPORT_TYPE': 'CCSPv2',
 }
 
-file_path = './metrics_utility/test/test_data/reports/2024/02/CCSPv2-2024-01.xlsx'
+file_path = './metrics_utility/test/test_data/reports/2024/01/CCSPv2-2024-01-28.xlsx'
 
 expected_sheets = {
     'Managed nodes': [
@@ -34,17 +34,12 @@ expected_sheets = {
 
 
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
-@pytest.mark.parametrize(
-    'cleanup',
-    [
-        file_path,
-    ],
-    indirect=True,
-)
-def test_command(cleanup):
+
+def test_command():
     """Build xlsx report using build command and test its contents."""
 
-    run_build_ext(env_vars, ['--month=2024-01', '--force'])
+    run_build_ext(env_vars, ['--since=2024-01-28', '--until=2024-01-30', '--force'])
+
 
     validate_sheet_columns(file_path, expected_sheets, 14)
     validate_sheet_tab_names(file_path, expected_sheets)

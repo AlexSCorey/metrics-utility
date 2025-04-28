@@ -152,14 +152,7 @@ expected_sheets = {
 
 
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
-@pytest.mark.parametrize(
-    'cleanup',
-    [
-        file_path,
-    ],
-    indirect=True,
-)
-def test_command(cleanup):
+def test_command():
     """Build xlsx report using build command and test its contents."""
 
     run_build_ext(env_vars, ['--month=2024-02', '--force'])
@@ -169,14 +162,7 @@ def test_command(cleanup):
 
 
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
-@pytest.mark.parametrize(
-    'cleanup',
-    [
-        file_path,
-    ],
-    indirect=True,
-)
-def test_import(cleanup):
+def test_import():
     """Build xlsx report using build command and test its contents."""
 
     run_build_int(
