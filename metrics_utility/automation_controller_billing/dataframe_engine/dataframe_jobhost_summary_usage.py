@@ -26,21 +26,17 @@ class DataframeJobhostSummaryUsage(Base):
             ###############################
 
             for data in self.extractor.iter_batches(date=date):
-                # If the dataframe is empty, skip additional processing
                 billing_data = data['job_host_summary']
                 managed_node_type = DIRECT
 
-                if not billing_data.empty:
-                    billing_data['managed_node_type'] = managed_node_type
-                else:
+                if billing_data.empty:
                     billing_data = data['indirect_nodes']
                     managed_node_type = INDIRECT
 
-                    if billing_data.empty:
-                        continue
+                if billing_data.empty:
+                    continue
 
-                    billing_data['managed_node_type'] = managed_node_type
-
+                billing_data['managed_node_type'] = managed_node_type
                 billing_data['managed_node_type_string'] = MANAGED_NODE_TYPES[managed_node_type]
 
                 print_debug(f'\nComputing data batch for {date}')
@@ -147,8 +143,8 @@ class DataframeJobhostSummaryUsage(Base):
 
                 print_data(billing_data_monthly_rollup, 'Actual global data')
 
-        if billing_data_monthly_rollup is None:
-            return None
+        if billing_data_monthly_rollup is None or billing_data_monthly_rollup.empty:
+            return pd.DataFrame(columns=self.data_columns() + self.unique_index_columns())
 
         return billing_data_monthly_rollup.reset_index()
 
