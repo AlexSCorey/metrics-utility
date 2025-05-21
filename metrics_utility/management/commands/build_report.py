@@ -77,13 +77,22 @@ class Command(BaseCommand):
         opt_since = options.get('since') or None
         opt_since = parse_date_param(opt_since)
 
-        opt_until = options.get('until') or None
-        opt_until = parse_date_param(opt_until)
-
         opt_ephemeral = options.get('ephemeral') or None
 
-        opt_force = options.get('force')
+        opt_until = None  # Initialize opt_until to None
 
+        if opt_since is not None:
+            # If --since was provided, then process --until
+            user_provided_until = options.get('until')
+            if user_provided_until is None:
+                # default --until to today
+                opt_until = datetime.datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                self.logger.info(f'--until parameter not provided with --since, defaulting to: {opt_until.date()}')
+            else:
+                # If --since and --until were both provided, parse the user's --until
+                opt_until = parse_date_param(user_provided_until)
+
+        opt_force = options.get('force')
         ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET', None)
         extra_params = self._handle_extra_params(ship_target)
         extra_params['opt_since'] = opt_since
@@ -108,7 +117,8 @@ class Command(BaseCommand):
             )
         else:
             extra_params['report_spreadsheet_destination_path'] = os.path.join(
-                extractor.get_report_path(month), f'{extra_params["report_type"]}-{opt_month}.xlsx'
+                extractor.get_report_path(month),
+                f'{extra_params["report_type"]}-{opt_month}.xlsx',
             )
 
         report_saver_engine = ReportSaverFactory(ship_target, extra_params=extra_params).create()
@@ -132,7 +142,10 @@ class Command(BaseCommand):
             return
 
         report_engine = ReportFactory(
-            report_period=opt_month, report_dataframe=report_dataframe, ship_target=ship_target, extra_params=extra_params
+            report_period=opt_month,
+            report_dataframe=report_dataframe,
+            ship_target=ship_target,
+            extra_params=extra_params,
         ).create()
         report_spreadsheet = report_engine.build_spreadsheet()
 
