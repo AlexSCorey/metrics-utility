@@ -21,6 +21,7 @@ from metrics_utility.management.validation import (
     handle_not_crc,
     handle_not_s3,
     handle_s3_ship_target,
+    handle_validate_date_param,
 )
 
 
@@ -33,7 +34,16 @@ class Command(BaseCommand):
     Gather Automation Controller billing data
     """
 
-    help = 'Gather Automation Controller billing data'
+    def __init__(self):
+        self.help_since = (
+            'Start date for collection including (e.g. --since=2023-12-20), a number of days ago (--since=5d), or a number of months (--since=2m).'
+        )
+        self.help_until = (
+            'End date for collection including (e.g. --until=2023-12-21), a number of days ago (--until=5d), or a number of months (--until=2m).'
+        )
+        self.help_time_frame_extra_params = (
+            'Missing required parameter --until, or --since. Metrics utility requires a value for at least one of the following: since, until.'
+        )
 
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', dest='dry-run', action='store_true', help='Gather billing metrics without shipping.')
@@ -64,7 +74,7 @@ class Command(BaseCommand):
         try:
             self._handle(self, *args, **options)
             exit(0)
-        except (BadShipTarget, MissingRequiredEnvVar, BadRequiredEnvVar, FailedToUploadPayload) as e:
+        except (BadShipTarget, MissingRequiredEnvVar, BadRequiredEnvVar, FailedToUploadPayload, UnparsableParameter) as e:
             self.logger.error(e.name)
             exit(1)
         except Exception as e:
@@ -73,6 +83,9 @@ class Command(BaseCommand):
 
     def _handle(self, *args, **options):
         self.init_logging()
+
+        handle_validate_date_param(self, options)
+
         opt_ship = options.get('ship')
         opt_dry_run = options.get('dry-run')
         opt_since = options.get('since') or None
@@ -119,13 +132,7 @@ class Command(BaseCommand):
     def _handle_datelike(self, value, help=''):
         if not value:
             return None
-
-        if value.isdigit():
-            raise UnparsableParameter(f'Bare numbers are not valid ({help})')
-
-        # Process ret argument
-        ret = None
-
+        # # Process ret argument
         if value.endswith('d'):
             days_ago = int(value[0:-1])
             ret = (datetime.datetime.now() - datetime.timedelta(days=days_ago - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -147,5 +154,4 @@ class Command(BaseCommand):
 
         # Process until argument
         until = self._handle_datelike(opt_until, help=help_until)
-
         return since, until

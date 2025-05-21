@@ -1,7 +1,11 @@
 import logging
 import os
+import re
 
-from metrics_utility.exceptions import MissingRequiredEnvVar
+from dateutil import parser
+
+from metrics_utility.automation_controller_billing.helpers import DAY_OR_MONTH_REGEX_PATTERN, parse_date_param
+from metrics_utility.exceptions import BadParameter, MissingRequiredEnvVar, MissingRequiredParameter, UnparsableParameter
 
 
 logger = logging.getLogger(__name__)
@@ -110,3 +114,61 @@ def handle_not_crc():
 
     if surplus:
         logger.warning(f'Ignoring env variables used without METRICS_UTILITY_SHIP_TARGET="crc": {", ".join(surplus)}')
+
+
+def handle_validate_date_param(
+    self,
+    options,
+):
+    params = ['since', 'until']
+    if options.get('ephemeral') and self.help_ephemeral:
+        params.append('ephemeral')
+    help_text = ''
+    exceptions = []
+    for param in params:
+        option = options.get(param)
+        if not option:
+            continue
+        if option.isdigit():
+            """If the value is a digit stop execution and render the failure message."""
+            exceptions.append('isdigit')
+            help_text = 'Integers are not allowed for parameters --since and --until.'
+            break
+        try:
+            """Try to parse the date, and if it fails go to next loop iteration.  Then, determine if we need to render the failure message."""
+            parser.parse(option)
+        except Exception:
+            help_text = getattr(self, f'help_{param}')
+            exceptions.append('parser')
+            continue
+        try:
+            """Try to parse the date, and if it fails go to next loop iteration.  Then, determine if we need to render the failure message."""
+            re.match(DAY_OR_MONTH_REGEX_PATTERN, option)
+        except Exception:
+            exceptions.append('match')
+            help_text = getattr(self, f'help_{param}')
+            continue
+    if len(exceptions) and ('isdigit' or ('parser' and 'match') in exceptions):
+        raise UnparsableParameter(help_text)
+
+
+def validate_build_extra_params(self, options):
+    opt_month = options.get('month') or None
+    since = None
+    until = None
+    handle_validate_date_param(self, options)
+
+    until = parse_date_param(options.get('until'))
+    since = parse_date_param(options.get('since'))
+    report_type = os.getenv('METRICS_UTILITY_REPORT_TYPE')
+    if report_type.startswith('RENEWAL_GUIDANCE') and until is not None:
+        raise BadParameter('The --until parameter is not allowed when environment variable METRICS_UTILITY_REPORT_TYPE is RENEWAL_GUIDANCE')
+
+    if since is None and until is None and opt_month is None:
+        raise MissingRequiredParameter(f"""{self.help_time_frame_extra_params} \n\n{self.help_since} \n{self.help_until} \n{self.help_month}""")
+
+    if (since is not None and until is not None) and until < since:
+        raise UnparsableParameter('The date for --until cannot be before the date for --since.')
+
+    if (since is not None or until is not None) and opt_month is not None:
+        raise BadParameter('The --since and --until parameters are not allowed if the --month parameter is provided.')

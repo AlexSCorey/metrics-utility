@@ -9,7 +9,10 @@ import pandas as pd
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
 
-from metrics_utility.exceptions import UnparsableParameter
+from metrics_utility.exceptions import DateFormatError, UnparsableParameter
+
+
+DAY_OR_MONTH_REGEX_PATTERN = r'.^\d+(d|day|days|m|mo|month|months)$'
 
 
 def parse_json_array(x):
@@ -113,3 +116,22 @@ def parse_number_of_days(date_option):
         raise UnparsableParameter(f"Can't parse parameter value {date_option}")
 
     return days
+
+
+def handle_month(month):
+    """Process month argument"""
+    if month is not None:
+        try:
+            date = datetime.datetime.strptime(f'{month}', '%Y-%m')
+        except ValueError:
+            raise DateFormatError('Invalid --month format. Supported date format: YYYY-MM')
+    else:
+        """Return last month if no month was passed"""
+        beginning_of_the_month = datetime.datetime.today().replace(day=1)
+        beginning_of_the_previous_month = beginning_of_the_month - relativedelta(months=1)
+        date = beginning_of_the_previous_month
+        y = date.strftime('%Y')
+        m = date.strftime('%m')
+        month = f'{y}-{m}'
+
+    return month, date, date + relativedelta(months=1)
