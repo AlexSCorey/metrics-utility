@@ -12,7 +12,9 @@ from dateutil.relativedelta import relativedelta
 from metrics_utility.exceptions import DateFormatError, UnparsableParameter
 
 
-DAY_OR_MONTH_REGEX_PATTERN = r'.^\d+(d|day|days|m|mo|month|months)$'
+ALLOWED_EPHEMERAL_PATTERN = r'^\d+(d|day|days|m|mo|month|months)$'
+SINCE_AND_UNTIL_GATHER_PATTERN = r'^\d+[dm]$|^\d{4}-\d{2}-\d{2}$'
+SINCE_AND_UNTIL_BUILD_PATTERN = r'^\d+(d|mo|month|months|m)$|^\d{4}-\d{2}-\d{2}$'
 
 
 def parse_json_array(x):

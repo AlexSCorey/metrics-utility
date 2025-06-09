@@ -4,7 +4,6 @@ import os
 
 from datetime import timezone
 
-from dateutil import parser
 from django.core.management.base import BaseCommand
 
 from metrics_utility.automation_controller_billing.dataframe_engine.factory import Factory as DataframeEngineFactory
@@ -12,7 +11,6 @@ from metrics_utility.automation_controller_billing.extract.factory import Factor
 from metrics_utility.automation_controller_billing.helpers import (
     handle_month,
     parse_date_param,
-    parse_number_of_days,
 )
 from metrics_utility.automation_controller_billing.report.factory import Factory as ReportFactory
 from metrics_utility.automation_controller_billing.report_saver.factory import Factory as ReportSaverFactory
@@ -43,36 +41,35 @@ class Command(BaseCommand):
     help = 'Gather Automation Controller billing data'
 
     def __init__(self):
-        # help = 'Gather Automation Controller billing data'
-        self.help_since = (
-            'Start date for collection including (e.g. --since=2023-12-20), a number of days ago (--since=5d), or a number of months (--since=2m).'
-        )
-        self.help_until = (
-            'End date for collection including (e.g. --until=2023-12-21), a number of days ago (--until=5d), or a number of months (--until=2m).'
-        )
-        self.help_time_frame_extra_params = (
-            'Missing required parameter --month, --until, or --since. Metrics utility requires a value for at least \n'
-            'one of the following: month, since, until.'
-        )
-        self.help_month = 'Month the report will be generated for, with format YYYY-MM. If this params is not provided, previous month report will \n'
-        "be generated if it doesn't exists already."
-        self.help_ephemeral = 'Duration in months or days to determine if host is ephemeral. Months are taken as 30days duration.\n'
-        'Example: --ephemeral=3months, or --ephemeral=3days'
+        super().__init__()
+
+        self.help = {
+            'since': """Start date for collection including (e.g. --since=2023-12-20), a number of minutes ago (--until=2m),
+              a number of days ago (--since=5d), or a number of months (--since=2m).""",
+            'until': 'End date for collection including (e.g. --until=2023-12-21), a number of minutes (--until=2m), '
+            'a number of days ago (--until=5d), or a number of months (--until=2m).',
+            'time_frame_extra_params': 'Missing required parameter --month, --until, or --since. Metrics utility requires a value for at least '
+            'one of the following: month, since, until.',
+            'month': """Month the report will be generated for, with format YYYY-MM. If this params is not provided, previous month report
+             will be generated if it doesn't exists already.""",
+            'ephemeral': """Duration in months or days to determine if host is ephemeral. Months are taken as 30days duration.
+            Example: --ephemeral=3months, or --ephemeral=3days""",
+        }
 
     def add_arguments(self, parser):
-        parser.add_argument('--month', dest='month', action='store', help=self.help_month)
-        parser.add_argument('--since', dest='since', action='store', help=self.help_since)
+        parser.add_argument('--month', dest='month', action='store', help=self.help.get('month'))
+        parser.add_argument('--since', dest='since', action='store', help=self.help.get('since'))
         parser.add_argument(
             '--until',
             dest='until',
             action='store',
-            help=self.help_until,
+            help=self.help.get('until'),
         )
         parser.add_argument(
             '--ephemeral',
             dest='ephemeral',
             action='store',
-            help=self.help_ephemeral,
+            help=self.help.get('ephemeral'),
         )
         parser.add_argument(
             '--force',
@@ -96,16 +93,15 @@ class Command(BaseCommand):
         options,
     ):
         param = options.get(param_name)
-        if (options.get('month') is not None or param is None) and param_name != 'ephemeral':
+        if options.get('month') is not None or param is None:
             return None
-        if param:
-            return parse_date_param(param) if parser.parse(param) else parse_number_of_days(param)
+        return parse_date_param(param)
 
     def _handle(self, *args, **options):
         self.init_logging()
         og_month, month, next_month = handle_month(options.get('month') or None)
 
-        validate_build_extra_params(self, options)
+        validate_build_extra_params(self.help, options)
         opt_month = og_month if options.get('month') else None
         opt_until = self._parse_param('until', options)
         opt_since = self._parse_param('since', options)
