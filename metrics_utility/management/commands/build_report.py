@@ -25,6 +25,7 @@ from metrics_utility.exceptions import (
 )
 from metrics_utility.management.validation import (
     handle_directory_ship_target,
+    handle_env_validation,
     handle_not_crc,
     handle_not_s3,
     handle_s3_ship_target,
@@ -57,6 +58,7 @@ class Command(BaseCommand):
         }
 
     def add_arguments(self, parser):
+        handle_env_validation('build')
         parser.add_argument('--month', dest='month', action='store', help=self.help.get('month'))
         parser.add_argument('--since', dest='since', action='store', help=self.help.get('since'))
         parser.add_argument(
