@@ -10,20 +10,8 @@ class ExtractorControllerDB:
     def __init__(self, extra_params, logger=logging.getLogger(__name__)):
         super().__init__()
 
-        self.path = extra_params['ship_path']
         self.extra_params = extra_params
-
         self.logger = logger
-
-    def get_report_path(self, date):
-        path_prefix = f'{self.path}/reports'
-
-        year = date.strftime('%Y')
-        month = date.strftime('%m')
-
-        path = f'{path_prefix}/{year}/{month}'
-
-        return path
 
     def iter_batches(self):
         with connection.cursor() as cursor:
