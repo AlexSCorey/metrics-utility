@@ -8,20 +8,18 @@ from django.core.management.base import BaseCommand
 
 from metrics_utility.automation_controller_billing.dataframe_engine.factory import Factory as DataframeEngineFactory
 from metrics_utility.automation_controller_billing.extract.factory import Factory as ExtractorFactory
-from metrics_utility.automation_controller_billing.helpers import (
-    handle_month,
-    parse_date_param,
-    parse_number_of_days,
-)
 from metrics_utility.automation_controller_billing.report.factory import Factory as ReportFactory
 from metrics_utility.automation_controller_billing.report_saver.factory import Factory as ReportSaverFactory
 from metrics_utility.exceptions import BadRequiredEnvVar, BadShipTarget, MissingRequiredEnvVar
 from metrics_utility.management.validation import (
     handle_directory_ship_target,
     handle_env_validation,
+    handle_month,
     handle_not_crc,
     handle_not_s3,
     handle_s3_ship_target,
+    parse_date_param,
+    parse_number_of_days,
     validate_build_extra_params,
 )
 
@@ -39,56 +37,39 @@ class Command(BaseCommand):
     """
 
     help = 'Build Report'
-
-    def __init__(self):
-        super().__init__()
-
-        self.help_texts = {
-            'since': (
-                'Start date for collection (e.g. --since=2023-12-20), '
-                'a number of minutes ago (--since=2m), '
-                'a number of days ago (--since=5d), or '
-                'a number of months ago (--since=2mo | 2 month | 2 months).'
-            ),
-            'until': (
-                'End date for collection (e.g. --until=2023-12-21), '
-                'a number of minutes ago (--until=2m), '
-                'a number of days ago (--until=5d), or '
-                'a number of months ago (--since=2mo | 2 month | 2 months).'
-            ),
-            'month': (
-                'Month the report will be generated for, with format YYYY-MM. '
-                "If this parameter is not provided, the previous month's report will be generated if it does not already exist."
-            ),
-            'ephemeral': (
-                'Duration in months or days to determine if host is ephemeral. '
-                'Months are considered as 30 days in duration. '
-                'Example: --ephemeral=3months, or --ephemeral=3days'
-            ),
-        }
+    help_texts = {
+        'since': (
+            'Start date for collection (e.g. --since=2023-12-20), '
+            'a number of minutes ago (--since=2m), '
+            'a number of days ago (--since=5d), or '
+            'a number of months ago (--since=2mo | 2 month | 2 months).'
+        ),
+        'until': (
+            'End date for collection (e.g. --until=2023-12-21), '
+            'a number of minutes ago (--until=2m), '
+            'a number of days ago (--until=5d), or '
+            'a number of months ago (--since=2mo | 2 month | 2 months).'
+        ),
+        'month': (
+            'Month the report will be generated for, with format YYYY-MM. '
+            "If this parameter is not provided, the previous month's report will be generated if it does not already exist."
+        ),
+        'ephemeral': (
+            'Duration in months or days to determine if host is ephemeral. '
+            'Months are considered as 30 days in duration. '
+            'Example: --ephemeral=3months, or --ephemeral=3days'
+        ),
+        'force': ('With this option, the existing reports will be overwritten if running this command again.'),
+        'verbose': ('Starts to print debug information to terminal.'),
+    }
 
     def add_arguments(self, parser):
         parser.add_argument('--month', dest='month', action='store', help=self.help_texts.get('month'))
         parser.add_argument('--since', dest='since', action='store', help=self.help_texts.get('since'))
-        parser.add_argument(
-            '--until',
-            dest='until',
-            action='store',
-            help=self.help_texts.get('until'),
-        )
-        parser.add_argument(
-            '--ephemeral',
-            dest='ephemeral',
-            action='store',
-            help=self.help_texts.get('ephemeral'),
-        )
-        parser.add_argument(
-            '--force',
-            dest='force',
-            action='store_true',
-            help='With this option, the existing reports will be overwritten if running this command again.',
-        )
-        parser.add_argument('--verbose', dest='verbose', action='store_true', help='Starts to print debug information to terminal.')
+        parser.add_argument('--until', dest='until', action='store', help=self.help_texts.get('until'))
+        parser.add_argument('--ephemeral', dest='ephemeral', action='store', help=self.help_texts.get('ephemeral'))
+        parser.add_argument('--force', dest='force', action='store_true', help=self.help_texts.get('force'))
+        parser.add_argument('--verbose', dest='verbose', action='store_true', help=self.help_texts.get('verbose'))
 
     def init_logging(self):
         self.logger = logging.getLogger('awx.main.analytics')

@@ -1,10 +1,7 @@
-import datetime
 import logging
 import os
 
-from dateutil import parser
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
 from metrics_utility.automation_controller_billing.collector import Collector
 from metrics_utility.exceptions import (
@@ -13,6 +10,7 @@ from metrics_utility.exceptions import (
 )
 from metrics_utility.management.validation import (
     handle_crc_ship_target,
+    handle_datelike,
     handle_directory_ship_target,
     handle_env_validation,
     handle_not_crc,
@@ -27,35 +25,23 @@ class Command(BaseCommand):
     Gather Automation Controller billing data
     """
 
-    def __init__(self):
-        super().__init__()
-        self.help = 'Gather Automation Controller billing data.'
-        self.help_texts = {
-            'since': (
-                'Start date for collection including (e.g. --since=2023-12-20), a number of days ago (--since=5d), '
-                'or a number of months (--since=2m).'
-            ),
-            'until': (
-                'End date for collection including (e.g. --until=2023-12-21), a number of days ago (--until=5d), or a number of months (--until=2m).'
-            ),
-        }
+    help = 'Gather Automation Controller billing data'
+    help_texts = {
+        'since': (
+            'Start date for collection including (e.g. --since=2023-12-20), a number of days ago (--since=5d), or a number of months (--since=2m).'
+        ),
+        'until': (
+            'End date for collection including (e.g. --until=2023-12-21), a number of days ago (--until=5d), or a number of months (--until=2m).'
+        ),
+        'dry-run': ('Gather billing metrics without shipping.'),
+        'ship': ('Enable shipping of billing metrics to the console.redhat.com'),
+    }
 
     def add_arguments(self, parser):
-        parser.add_argument('--dry-run', dest='dry-run', action='store_true', help='Gather billing metrics without shipping.')
-        parser.add_argument('--ship', dest='ship', action='store_true', help='Enable shipping of billing metrics to the console.redhat.com')
-
-        parser.add_argument(
-            '--since',
-            dest='since',
-            action='store',
-            help=self.help_texts.get('since'),
-        )
-        parser.add_argument(
-            '--until',
-            dest='until',
-            action='store',
-            help=self.help_texts.get('until'),
-        )
+        parser.add_argument('--dry-run', dest='dry-run', action='store_true', help=self.help_texts.get('dry-run'))
+        parser.add_argument('--ship', dest='ship', action='store_true', help=self.help_texts.get('ship'))
+        parser.add_argument('--since', dest='since', action='store', help=self.help_texts.get('since'))
+        parser.add_argument('--until', dest='until', action='store', help=self.help_texts.get('until'))
 
     def init_logging(self):
         self.logger = logging.getLogger('awx.main.analytics')
@@ -69,15 +55,16 @@ class Command(BaseCommand):
         self.init_logging()
         handle_env_validation('gather')
 
-        handle_validate_date_param(options.get('since', None), self.help_texts.get('since'), 'gather')
-        handle_validate_date_param(options.get('until', None), self.help_texts.get('until'), 'gather')
-
+        opt_since = options.get('since')
+        opt_until = options.get('until')
         opt_ship = options.get('ship')
         opt_dry_run = options.get('dry-run')
-        opt_since = options.get('since') or None
-        opt_until = options.get('until') or None
 
-        since, until = self._handle_interval(opt_since, opt_until)
+        handle_validate_date_param(opt_since, self.help_texts.get('since'), 'gather')
+        handle_validate_date_param(opt_until, self.help_texts.get('until'), 'gather')
+
+        since = handle_datelike(opt_since)
+        until = handle_datelike(opt_until)
 
         ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET', None)
         billing_provider_params = self._handle_ship_target(ship_target)
@@ -114,30 +101,3 @@ class Command(BaseCommand):
         else:
             allowed = ', '.join(['crc', 'directory', 's3'])
             raise BadShipTarget(f'Unexpected value for METRICS_UTILITY_SHIP_TARGET env var ({ship_target}), allowed values: {allowed}')
-
-    def _handle_datelike(self, value, help=''):
-        if not value:
-            return None
-        # # Process ret argument
-        if value.endswith('d'):
-            days_ago = int(value[0:-1])
-            ret = (datetime.datetime.now() - datetime.timedelta(days=days_ago - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        elif value.endswith('m'):
-            minutes_ago = int(value[0:-1])
-            ret = datetime.datetime.now() - datetime.timedelta(minutes=minutes_ago)
-        else:
-            ret = parser.parse(value)
-
-        # Add default utc timezone
-        if ret and ret.tzinfo is None:
-            ret = ret.replace(tzinfo=timezone.utc)
-
-        return ret
-
-    def _handle_interval(self, opt_since, opt_until):
-        # Process since argument
-        since = self._handle_datelike(opt_since, help=self.help_texts.get('since'))
-
-        # Process until argument
-        until = self._handle_datelike(opt_until, help=self.help_texts.get('until'))
-        return since, until
