@@ -11,7 +11,7 @@ from metrics_utility.test.util import run_build_int
 
 # Get current date and time
 now = datetime.now()
-diff_months = 2000
+diff_months = 500
 
 # Extract current date components with leading zeros
 current_month = f'{now.month:02}'
@@ -61,7 +61,6 @@ expected_sheets = {
         {
             'Host name': [
                 'default_host_hostmetric_1',
-                'default_host_hostmetric_10',
                 'default_host_hostmetric_3',
                 'default_host_hostmetric_4',
                 'default_host_hostmetric_7',
@@ -71,7 +70,6 @@ expected_sheets = {
         {
             'First\nautomation': [
                 '2025-06-01 08:00:00',
-                '2025-06-03 11:15:00',
                 '2025-06-03 12:00:00',
                 '2025-06-02 07:30:00',
                 '2025-06-04 10:30:00',
@@ -81,7 +79,6 @@ expected_sheets = {
         {
             'Last\nautomation': [
                 '2025-06-10 14:30:00',
-                '2025-06-11 10:45:00',
                 '2025-06-11 13:45:00',
                 '2025-06-09 15:30:00',
                 '2025-06-10 12:30:00',
@@ -91,7 +88,6 @@ expected_sheets = {
         {
             'Number of\nAutomations': [
                 12,
-                11,
                 7,
                 10,
                 8,
@@ -101,7 +97,6 @@ expected_sheets = {
         {
             'Number of days\nbetween first_automation\nand last_automation': [
                 9,
-                7,
                 8,
                 7,
                 6,
@@ -110,7 +105,6 @@ expected_sheets = {
         },
         {
             'Number of\nDeletions': [
-                0,
                 0,
                 0,
                 0,
@@ -125,12 +119,10 @@ expected_sheets = {
                 None,
                 None,
                 None,
-                None,
             ]
         },
         {
             'HostMetric\nrecord count': [
-                1,
                 1,
                 1,
                 1,
@@ -145,12 +137,10 @@ expected_sheets = {
                 1,
                 1,
                 1,
-                1,
             ]
         },
         {
             'HostMetric deleted\nrecord count': [
-                0,
                 0,
                 0,
                 0,
@@ -161,7 +151,6 @@ expected_sheets = {
         {
             'Host names': [
                 'default_host_hostmetric_1',
-                'default_host_hostmetric_10',
                 'default_host_hostmetric_3',
                 'default_host_hostmetric_4',
                 'default_host_hostmetric_7',
@@ -170,7 +159,6 @@ expected_sheets = {
         },
         {
             'Variables ansible_host': [
-                None,
                 None,
                 None,
                 None,
@@ -185,12 +173,10 @@ expected_sheets = {
                 None,
                 None,
                 None,
-                None,
             ]
         },
         {
             'Machine UUIDs': [
-                None,
                 None,
                 None,
                 None,
@@ -315,6 +301,7 @@ expected_sheets = {
     ],
 }
 
+
 expected_sheets = convert_datetime_strings(expected_sheets)
 
 
@@ -326,7 +313,6 @@ expected_sheets = convert_datetime_strings(expected_sheets)
     indirect=True,
 )
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
-@pytest.mark.skip(reason='Skipping this test until PR with data is merged')
 def test_import(cleanup):
     """Build xlsx report using build command and test its contents."""
 
@@ -337,8 +323,8 @@ def test_import(cleanup):
             'force': True,
         },
     )
-
     validate_sheet_columns(file_path, expected_sheets, 6)
+
     validate_sheet_tab_names(file_path, expected_sheets, ['Usage Reporting'])
 
     wb = openpyxl.load_workbook(file_path)
@@ -353,7 +339,7 @@ def test_import(cleanup):
         validate_cell(wb, sh, 'B1', None)
         validate_cell(wb, sh, 'B2', f'{start_year}-{start_month}-{start_day}, {current_year}-{current_month}-{current_day}')
         validate_cell(wb, sh, 'B3', 'Quantity')
-        validate_cell(wb, sh, 'B4', 6)
+        validate_cell(wb, sh, 'B4', 5)
         validate_cell(wb, sh, 'B5', 4)
 
         validate_cell(wb, sh, 'D1', now.strftime('Updated: %b %d, %Y'))
