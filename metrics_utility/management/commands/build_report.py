@@ -12,15 +12,15 @@ from metrics_utility.automation_controller_billing.report.factory import Factory
 from metrics_utility.automation_controller_billing.report_saver.factory import Factory as ReportSaverFactory
 from metrics_utility.exceptions import BadRequiredEnvVar, BadShipTarget, MissingRequiredEnvVar
 from metrics_utility.management.validation import (
+    date_format_text,
     handle_directory_ship_target,
     handle_env_validation,
     handle_month,
     handle_not_crc,
     handle_not_s3,
     handle_s3_ship_target,
-    parse_date_param,
     parse_number_of_days,
-    validate_build_extra_params,
+    validate_build_params,
 )
 
 
@@ -38,18 +38,8 @@ class Command(BaseCommand):
 
     help = 'Build Report'
     help_texts = {
-        'since': (
-            'Start date for collection (e.g. --since=2023-12-20), '
-            'a number of minutes ago (--since=2m), '
-            'a number of days ago (--since=5d), or '
-            'a number of months ago (--since=2mo | 2 month | 2 months).'
-        ),
-        'until': (
-            'End date for collection (e.g. --until=2023-12-21), '
-            'a number of minutes ago (--until=2m), '
-            'a number of days ago (--until=5d), or '
-            'a number of months ago (--since=2mo | 2 month | 2 months).'
-        ),
+        'since': (f'Start date for collection, including. {date_format_text.format(name="since")}'),
+        'until': (f'End date for collection, including. {date_format_text.format(name="until")}'),
         'month': (
             'Month the report will be generated for, with format YYYY-MM. '
             "If this parameter is not provided, the previous month's report will be generated if it does not already exist."
@@ -83,11 +73,9 @@ class Command(BaseCommand):
         self.init_logging()
         handle_env_validation('build')
 
-        validate_build_extra_params(self.help_texts, options)
+        opt_since, opt_until = validate_build_params(options, self.help_texts)
 
         opt_month, month, next_month = handle_month(options.get('month') or None)
-        opt_since = parse_date_param(options.get('since'))
-        opt_until = parse_date_param(options.get('until'))
         opt_ephemeral = parse_number_of_days(options.get('ephemeral'))
         opt_force = options.get('force')
 
