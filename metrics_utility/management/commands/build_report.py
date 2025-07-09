@@ -2,11 +2,13 @@ import datetime
 import logging
 import os
 
+from argparse import RawDescriptionHelpFormatter
 from datetime import timezone
 
 from django.core.management.base import BaseCommand
 
-from metrics_utility.automation_controller_billing.dataframe_engine.factory import Factory as DataframeEngineFactory
+from metrics_utility.automation_controller_billing.dataframe_engine.factory import Factory as DataframeFactory
+from metrics_utility.automation_controller_billing.dedup.factory import Factory as DedupFactory
 from metrics_utility.automation_controller_billing.extract.factory import Factory as ExtractorFactory
 from metrics_utility.automation_controller_billing.report.factory import Factory as ReportFactory
 from metrics_utility.automation_controller_billing.report_saver.factory import Factory as ReportSaverFactory
@@ -53,6 +55,31 @@ class Command(BaseCommand):
         'verbose': ('Starts to print debug information to terminal.'),
     }
 
+    def create_parser(self, prog_name, subcommand, **kwargs):
+        return super().create_parser(
+            prog_name,
+            subcommand,
+            # ensure newlines are preserved in descriptions and epilog
+            formatter_class=RawDescriptionHelpFormatter,
+            epilog='\n'.join(
+                [
+                    'ENVIRONMENT',
+                    "    METRICS_UTILITY_REPORT_TYPE (required, case sensitive): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'",
+                    "        determines which kind of report we're generating",
+                    '',
+                    "    METRICS_UTILITY_SHIP_TARGET (required): one of 'directory', 's3', 'controller_db'",
+                    '        input/output mechanism',
+                    '',
+                    '    METRICS_UTILITY_SHIP_PATH (required): a path',
+                    '        local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/',
+                    '',
+                    "    METRICS_UTILITY_DEDUPLICATOR (optional): one of 'ccsp', 'renewal', 'ccsp-experimental'",
+                    "        choice of deduplication algorithm, defaults to 'ccsp' or 'renewal' based on the chosen report type",
+                ]
+            ),
+            **kwargs,
+        )
+
     def add_arguments(self, parser):
         parser.add_argument('--month', dest='month', action='store', help=self.help_texts.get('month'))
         parser.add_argument('--since', dest='since', action='store', help=self.help_texts.get('since'))
@@ -86,6 +113,7 @@ class Command(BaseCommand):
         extra_params['ephemeral_days'] = opt_ephemeral
         extra_params['month_since'] = month
         extra_params['month_until'] = next_month
+        extra_params['deduplicator'] = os.getenv('METRICS_UTILITY_DEDUPLICATOR', None) or None
 
         extractor = ExtractorFactory(ship_target, extra_params).create()
 
@@ -118,16 +146,19 @@ class Command(BaseCommand):
             )
             return
 
-        report_dataframe = DataframeEngineFactory(extractor=extractor, month=month, extra_params=extra_params).create()
+        dataframes = DataframeFactory(extractor=extractor, month=month, extra_params=extra_params).create()
 
-        if all(item is None or item.empty for item in report_dataframe):
+        dedup = DedupFactory(dataframes=dataframes, extra_params=extra_params).create()
+        dataframes = dedup.run()
+
+        if all(dataframe is None or dataframe.empty for _name, dataframe in dataframes.items()):
             if opt_since is not None:
                 self.logger.info(f'No billing data for input date range {extra_params["since_date"]}--{extra_params["until_date"]}')
             else:
                 self.logger.info(f'No billing data for month {opt_month}')
             return
 
-        report_engine = ReportFactory(report_dataframe=report_dataframe, extra_params=extra_params).create()
+        report_engine = ReportFactory(dataframes=dataframes, extra_params=extra_params).create()
         report_spreadsheet = report_engine.build_spreadsheet()
 
         # Save the report to the configured destination
