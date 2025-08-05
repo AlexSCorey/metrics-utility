@@ -13,7 +13,8 @@ from django.db.utils import ProgrammingError
 from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
 
-from metrics_utility.base import Collector, CsvFileSplitter, register
+from metrics_utility.base import CsvFileSplitter, register
+from metrics_utility.base.utils import get_max_gather_period_days
 from metrics_utility.logger import logger
 
 
@@ -46,7 +47,7 @@ def daily_slicing(key, last_gather, **kwargs):
     else:
         from awx.conf.models import Setting
 
-        horizon = until - timedelta(weeks=Collector.MAX_GATHER_PERIOD_WEEKS)
+        horizon = until - timedelta(days=get_max_gather_period_days())
         last_entries = Setting.objects.filter(key='AUTOMATION_ANALYTICS_LAST_ENTRIES').first()
         last_entries = json.loads((last_entries.value if last_entries is not None else '') or '{}', object_hook=datetime_hook)
         try:
