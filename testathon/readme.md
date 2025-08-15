@@ -2,6 +2,12 @@
 
 This will print env vars that are used in scripts. Its better than printvars command, more readable.
 
+Variable ENVIRONMENT is:
+None (local)
+RPM
+OpenShift
+containerized
+
 # testathon_data_prepare.py
 
 If you run this directly without any parameters, it will prepopulate local environment db, provided that it runs
@@ -65,6 +71,8 @@ You can access it also using SSH and classic URL, the script then connect to the
 SSH will be again for controller.
 
 You will find it again in inventory file of jenkins artifact.
+
+SSH_USER should be: ansible
 
 ## Openshift build
 
@@ -178,6 +186,13 @@ Gather all gathers whole data from begining to datetime now. It uses the same en
 uv run gather_all.py
 
 It will run it locally, or if RPM variables (above) are set, it will gather in RPM.
+
+# build_and_copy.py
+
+Useful script that takes the same env variables as previous, connects to environment, runs build report with all of the parameters
+and input and then copy report back to the folder where it was called.
+
+Works only for RPM and Containerized.
 
 
 
