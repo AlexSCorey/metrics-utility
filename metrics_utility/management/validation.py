@@ -48,7 +48,7 @@ VALID_SHEETS = {
         'managed_nodes_by_organizations',
     },
 }
-VALID_COLLECTORS = {'main_host', 'main_jobevent', 'main_indirectmanagednodeaudit', ''}
+VALID_COLLECTORS = {'main_host', 'main_jobevent', 'main_indirectmanagednodeaudit', 'total_workers_vcpu', ''}
 VALID_SHIP_TARGET_BUILD = {'directory', 's3', 'controller_db'}
 VALID_SHIP_TARGET_GATHER = {'directory', 's3', 'crc'}
 
@@ -224,11 +224,12 @@ def validate_collectors(errors):
             list of collector names. Defaults to 'main_jobevent' if not set.
 
     Notes:
-        - The set of valid collectors is defined by the global variable
+        - The set of valid optional collectors is defined by the global variable
           VALID_COLLECTORS.
         - Error messages include the invalid collector names and the list of
           valid values.
     """
+
     collectors = os.environ.get('METRICS_UTILITY_OPTIONAL_COLLECTORS', 'main_jobevent').split(',')
     if collectors:
         invalid = set(collectors) - VALID_COLLECTORS

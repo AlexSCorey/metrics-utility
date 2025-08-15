@@ -3,6 +3,8 @@ import os
 import os.path
 import platform
 
+from datetime import datetime, timezone
+
 import distro
 
 from awx.conf.license import get_license
@@ -12,10 +14,13 @@ from django.db import connection
 from django.db.utils import ProgrammingError
 from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
+from kubernetes import client
+from kubernetes import config as kube_config
 
 from metrics_utility.base import CsvFileSplitter, register
 from metrics_utility.base.utils import get_max_gather_period_days, get_optional_collectors
-from metrics_utility.logger import logger
+from metrics_utility.exceptions import MetricsException, MissingRequiredEnvVar
+from metrics_utility.logger import logger, logger_info_level
 
 
 """
@@ -204,6 +209,14 @@ def yaml_and_json_parsing_functions():
 
 @register('job_host_summary', '1.2', format='csv', description=_('Data for billing'), fnc_slicing=daily_slicing)
 def job_host_summary_table(since, full_path, until, **kwargs):
+    disable_job_host_summary_str = os.environ.get('METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR', 'false')
+    disable_job_host_summary = False
+    if disable_job_host_summary_str and (disable_job_host_summary_str.lower() == 'true'):
+        disable_job_host_summary = True
+
+    if disable_job_host_summary:
+        return None
+
     # TODO: controler needs to have an index on main_jobhostsummary.modified
     prepend_query = """
         -- Define function for parsing field out of yaml encoded as text
@@ -520,3 +533,67 @@ def main_host_table(since, full_path, until, **kwargs):
     return _copy_table(
         table='main_host', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path, prepend_query=yaml_and_json_parsing_functions()
     )
+
+
+@register('total_workers_vcpu', '1.0', format='json', description=_('Total workers vCPU'), fnc_slicing=limit_slicing)
+def total_workers_vcpu(since, full_path, until, **kwargs):
+    if 'total_workers_vcpu' not in get_optional_collectors():
+        return None
+
+    cluster_name = os.environ.get('METRICS_UTILITY_CLUSTER_NAME')
+    if not cluster_name:
+        logger.error('environment variable METRICS_UTILITY_CLUSTER_NAME is not set')
+        raise MissingRequiredEnvVar('environment variable METRICS_UTILITY_CLUSTER_NAME is not set')
+
+    now = datetime.now(timezone.utc)
+
+    info = {'cluster_name': cluster_name, 'timestamp': now.isoformat(), 'nodes': []}
+    # If METRICS_UTILITY_USAGE_BASED_BILLING_ENABLED is not set or set to false then it returns 1
+    usage_based_billing_enabled_str = os.environ.get('METRICS_UTILITY_USAGE_BASED_BILLING_ENABLED')
+    usage_based_billing_enabled = False
+    if usage_based_billing_enabled_str and (usage_based_billing_enabled_str.lower() == 'true'):
+        usage_based_billing_enabled = True
+    info['usage_based_billing_enabled'] = usage_based_billing_enabled
+    if not usage_based_billing_enabled:
+        info['total_workers_vcpu'] = 1
+        # This message must always appear in the log regardless of the log level.
+        logger_info_level.info(json.dumps(info, indent=2))
+        return {'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}
+
+    try:
+        kube_config.load_incluster_config()
+    except kube_config.ConfigException:
+        try:
+            kube_config.load_kube_config()
+        except kube_config.ConfigException as e:
+            logger.error(f'Could not configure Kubernetes Python client ERROR: {e}')
+            raise MetricsException(f'Could not configure Kubernetes Python client ERROR: {e}')
+
+    # Create a CoreV1Api client
+    api_instance = client.CoreV1Api()
+    if not api_instance:
+        raise MetricsException('Could not get a Kube CoreV1Api client')
+
+    try:
+        nodes = api_instance.list_node()
+    except Exception as e:
+        raise MetricsException(f'Unexpected error when retrieving nodes: {e}')
+
+    if nodes is None:
+        raise MetricsException('No nodes found')
+
+    total_workers_vcpu = 0
+    # In SaaS case we have only Worker nodes and so we don't need to filter out the control plan.
+    # If it used for other environement, we might need to implement the filtering.
+    for node_info in nodes.items:
+        for resource, value in node_info.status.capacity.items():
+            if resource == 'cpu':
+                info['nodes'].append({node_info.metadata.name: int(value)})
+                total_workers_vcpu += int(value)
+
+    info['total_workers_vcpu'] = total_workers_vcpu
+
+    # This message must always appear in the log regardless of the log level.
+    logger_info_level.info(json.dumps(info, indent=2))
+
+    return {'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}

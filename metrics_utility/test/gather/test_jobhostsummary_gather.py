@@ -11,6 +11,58 @@ from metrics_utility.base.collection import Collection
 from metrics_utility.test.util import run_gather_ext, run_gather_int
 
 
+def safe_tarfile_member_check(member):
+    """
+    Check if a tar member is safe to extract (no path traversal).
+
+    This function prevents 'tar slip' or 'zip slip' attacks by validating
+    that tar members don't contain dangerous paths that could extract files
+    outside the intended directory.
+
+    SonarQube compliance: Addresses security hotspot for archive expansion.
+    """
+    # Reject device files and FIFOs which could be dangerous
+    if member.isdev() or member.isfifo():
+        return False
+    # Reject paths with directory traversal patterns
+    if '..' in member.name or member.name.startswith('/'):
+        return False
+    return True
+
+
+class SafeTarFile:
+    """
+    A context manager for safely opening and reading tar files.
+
+    This class ensures that tar file operations are safe from path traversal
+    attacks by filtering out dangerous members during opening.
+
+    SonarQube compliance: Provides safe archive handling.
+    """
+
+    def __init__(self, file_path, mode='r:gz'):
+        self.file_path = file_path
+        self.mode = mode
+        self.tar = None
+
+    def __enter__(self):
+        # Open the tar file - suppressed security warning as we immediately filter members below
+        self.tar = tarfile.open(self.file_path, self.mode)
+
+        # Filter members to only include safe ones
+        original_members = self.tar.getmembers()
+        safe_members = [m for m in original_members if safe_tarfile_member_check(m)]
+
+        # Replace the members list with filtered safe members
+        self.tar.members = safe_members
+
+        return self.tar
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.tar:
+            self.tar.close()
+
+
 # environment for run_gather_ext
 env_vars = {
     'METRICS_UTILITY_REPORT_TYPE': 'CCSPv2',
@@ -97,8 +149,8 @@ def test_command(cleanup_glob):
 
     # locate the generated tarball(s)
     for file_path in glob.glob(file_paths):
-        with tarfile.open(file_path, 'r:gz') as tar:
-            # look for the CSV inside
+        with SafeTarFile(file_path) as tar:
+            # look for the CSV inside (members are already filtered for safety)
             try:
                 member = next(m for m in tar.getmembers() if m.name.endswith('job_host_summary.csv'))
             except StopIteration:
@@ -139,6 +191,131 @@ def test_command(cleanup_glob):
 
 
 @pytest.mark.filterwarnings('ignore::ResourceWarning')
+def test_job_host_summary_disabled_by_env_var(cleanup_glob):
+    """Test that job_host_summary.csv is not generated when METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR is set to 'true'."""
+
+    # Create environment variables with collector disabled
+    disabled_env_vars = env_vars.copy()
+    disabled_env_vars['METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR'] = 'true'
+
+    # run the gather command with disabled collector
+    run_gather_ext(disabled_env_vars, ['--ship', '--since=2025-06-12', '--until=2025-06-14'])
+
+    jobhost_found = False
+
+    # locate the generated tarball(s)
+    for file_path in glob.glob(file_paths):
+        with SafeTarFile(file_path) as tar:
+            # look for the CSV inside - it should NOT be present (members are already filtered for safety)
+            try:
+                next(m for m in tar.getmembers() if m.name.endswith('job_host_summary.csv'))
+                jobhost_found = True
+            except StopIteration:
+                # This is expected when collector is disabled
+                continue
+
+    if jobhost_found:
+        pytest.fail('job_host_summary.csv should not be generated when collector is disabled.')
+
+
+@pytest.mark.filterwarnings('ignore::ResourceWarning')
+def test_job_host_summary_enabled_explicitly(cleanup_glob):
+    """Test that job_host_summary.csv is generated when METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR is explicitly set to 'false'."""
+
+    # Create environment variables with collector explicitly enabled
+    enabled_env_vars = env_vars.copy()
+    enabled_env_vars['METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR'] = 'false'
+
+    # run the gather command with explicitly enabled collector
+    run_gather_ext(enabled_env_vars, ['--ship', '--since=2025-06-12', '--until=2025-06-14'])
+
+    jobhost_found = False
+
+    # locate the generated tarball(s)
+    for file_path in glob.glob(file_paths):
+        with SafeTarFile(file_path) as tar:
+            # look for the CSV inside - it should be present (members are already filtered for safety)
+            try:
+                next(m for m in tar.getmembers() if m.name.endswith('job_host_summary.csv'))
+                jobhost_found = True
+                break
+            except StopIteration:
+                continue
+
+    if not jobhost_found:
+        pytest.fail('job_host_summary.csv should be generated when collector is explicitly enabled.')
+
+
+@pytest.mark.filterwarnings('ignore::ResourceWarning')
+def test_job_host_summary_case_insensitive_disable(cleanup_glob):
+    """Test that the environment variable check is case insensitive for 'true' values."""
+
+    test_cases = ['TRUE', 'True', 'tRuE']
+
+    for test_value in test_cases:
+        # Create environment variables with collector disabled using different cases
+        disabled_env_vars = env_vars.copy()
+        disabled_env_vars['METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR'] = test_value
+
+        # run the gather command with disabled collector
+        run_gather_ext(disabled_env_vars, ['--ship', '--since=2025-06-12', '--until=2025-06-14'])
+
+        jobhost_found = False
+
+        # locate the generated tarball(s)
+        for file_path in glob.glob(file_paths):
+            with SafeTarFile(file_path) as tar:
+                # look for the CSV inside - it should NOT be present (members are already filtered for safety)
+                try:
+                    next(m for m in tar.getmembers() if m.name.endswith('job_host_summary.csv'))
+                    jobhost_found = True
+                except StopIteration:
+                    # This is expected when collector is disabled
+                    continue
+
+        if jobhost_found:
+            pytest.fail(f'job_host_summary.csv should not be generated when collector is disabled with value "{test_value}".')
+
+        # Clean up files for next iteration
+        for file in glob.glob(file_glob):
+            os.remove(file)
+
+
+@pytest.mark.filterwarnings('ignore::ResourceWarning')
+def test_job_host_summary_invalid_values_still_enabled(cleanup_glob):
+    """Test that job_host_summary.csv is still generated when METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR is set to invalid values."""
+
+    invalid_values = ['yes', 'no', '1', '0', 'enabled', 'disabled', 'random_text', '']
+
+    for test_value in invalid_values:
+        # Create environment variables with collector set to invalid value
+        test_env_vars = env_vars.copy()
+        test_env_vars['METRICS_UTILITY_DISABLE_JOB_HOST_SUMMARY_COLLECTOR'] = test_value
+
+        # run the gather command
+        run_gather_ext(test_env_vars, ['--ship', '--since=2025-06-12', '--until=2025-06-14'])
+
+        jobhost_found = False
+
+        # locate the generated tarball(s)
+        for file_path in glob.glob(file_paths):
+            with SafeTarFile(file_path) as tar:
+                # look for the CSV inside - it should be present since invalid values don't disable (members are already filtered for safety)
+                try:
+                    next(m for m in tar.getmembers() if m.name.endswith('job_host_summary.csv'))
+                    jobhost_found = True
+                    break
+                except StopIteration:
+                    continue
+
+        if not jobhost_found:
+            pytest.fail(f'job_host_summary.csv should be generated when collector has invalid disable value "{test_value}".')
+
+        # Clean up files for next iteration
+        for file in glob.glob(file_glob):
+            os.remove(file)
+
+
 def test_main_host_collection(cleanup_glob):
     """Test that main_host table collection runs without error and all collections have 'ok' status."""
     # Enable main_host collection by adding it to optional collectors
