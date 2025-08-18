@@ -29,13 +29,13 @@ class PackageCRC(base.Package):
         return os.getenv('METRICS_UTILITY_CRC_INGRESS_URL', 'https://console.redhat.com/api/ingress/v1/upload')
 
     def get_proxy_url(self):
-        return os.getenv('METRICS_UTILITY_PROXY_URL', None)
+        return os.getenv('METRICS_UTILITY_PROXY_URL')
 
     def _get_rh_user(self):
-        return os.getenv('METRICS_UTILITY_SERVICE_ACCOUNT_ID', None)
+        return os.getenv('METRICS_UTILITY_SERVICE_ACCOUNT_ID')
 
     def _get_rh_password(self):
-        return os.getenv('METRICS_UTILITY_SERVICE_ACCOUNT_SECRET', None)
+        return os.getenv('METRICS_UTILITY_SERVICE_ACCOUNT_SECRET')
 
     def _get_http_request_headers(self):
         return get_awx_http_client_headers()
@@ -48,7 +48,7 @@ class PackageCRC(base.Package):
         return self.SHIPPING_AUTH_SERVICE_ACCOUNT
 
     def is_shipping_configured(self):
-        # TODO: move to base
+        # TODO: move to base, or children
         ret = super()
         if ret is False:
             return False

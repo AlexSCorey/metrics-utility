@@ -2,7 +2,6 @@ import datetime
 import os
 
 from argparse import RawDescriptionHelpFormatter
-from datetime import timezone
 
 from django.core.management.base import BaseCommand
 
@@ -91,6 +90,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if options.get('verbose'):
             debug()
+
         handle_env_validation('build')
 
         opt_since, opt_until = validate_build_params(options, self.help_texts)
@@ -99,33 +99,37 @@ class Command(BaseCommand):
         opt_ephemeral = parse_number_of_days(options.get('ephemeral'))
         opt_force = options.get('force')
 
-        ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET', None)
+        ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET')
+
+        # FIXME: separate params per factory
         extra_params = self._handle_extra_params(ship_target)
         extra_params['opt_since'] = opt_since
         extra_params['opt_until'] = opt_until
         extra_params['ephemeral_days'] = opt_ephemeral
         extra_params['month_since'] = month
         extra_params['month_until'] = next_month
-        extra_params['deduplicator'] = os.getenv('METRICS_UTILITY_DEDUPLICATOR', None) or None
-
-        extractor = ExtractorFactory(ship_target, extra_params).create()
+        extra_params['deduplicator'] = os.getenv('METRICS_UTILITY_DEDUPLICATOR') or None
 
         # Determine destination path for generated report and skip processing if it exists
+        report_type = extra_params['report_type']
+        ship_path = extra_params['ship_path']
         if opt_since is not None:
-            now = datetime.datetime.now().replace(second=0, microsecond=0, tzinfo=timezone.utc)
-            extra_params['since_date'] = opt_since.date()
-            extra_params['until_date'] = opt_until.date() if opt_until else now.date()
+            since_date = opt_since.date()
+            until_date = opt_until.date() if opt_until else datetime.date.today()
 
-            extra_params['report_period'] = f'{extra_params["since_date"]}, {extra_params["until_date"]}'
+            extra_params['since_date'] = since_date
+            extra_params['until_date'] = until_date
+
+            extra_params['report_period'] = f'{since_date}, {until_date}'
             extra_params['report_spreadsheet_destination_path'] = os.path.join(
-                get_report_path(extra_params['ship_path'], extra_params['until_date']),
-                f'{extra_params["report_type"]}-{extra_params["since_date"]}--{extra_params["until_date"]}.xlsx',
+                get_report_path(ship_path, until_date),
+                f'{report_type}-{since_date}--{until_date}.xlsx',
             )
         else:
             extra_params['report_period'] = opt_month
             extra_params['report_spreadsheet_destination_path'] = os.path.join(
-                get_report_path(extra_params['ship_path'], month),
-                f'{extra_params["report_type"]}-{opt_month}.xlsx',
+                get_report_path(ship_path, month),
+                f'{report_type}-{opt_month}.xlsx',
             )
 
         report_saver_engine = ReportSaverFactory(ship_target, extra_params=extra_params).create()
@@ -139,6 +143,9 @@ class Command(BaseCommand):
             )
             return
 
+        extractor = ExtractorFactory(ship_target, extra_params).create()
+
+        # FIXME move from month to extra_params
         dataframes = DataframeFactory(extractor=extractor, month=month, extra_params=extra_params).create()
 
         dedup = DedupFactory(dataframes=dataframes, extra_params=extra_params).create()
@@ -146,7 +153,7 @@ class Command(BaseCommand):
 
         if all(dataframe is None or dataframe.empty for _name, dataframe in dataframes.items()):
             if opt_since is not None:
-                logger.info(f'No billing data for input date range {extra_params["since_date"]}--{extra_params["until_date"]}')
+                logger.info(f'No billing data for input date range {since_date}--{until_date}')
             else:
                 logger.info(f'No billing data for month {opt_month}')
             return
@@ -174,7 +181,7 @@ class Command(BaseCommand):
     def _handle_extra_params(self, ship_target=None):
         base = self._handle_ship_target(ship_target)
 
-        report_type = os.getenv('METRICS_UTILITY_REPORT_TYPE', None)
+        report_type = os.getenv('METRICS_UTILITY_REPORT_TYPE')
         price_per_node = float(os.getenv('METRICS_UTILITY_PRICE_PER_NODE', 0))
 
         if not report_type:
@@ -205,7 +212,7 @@ class Command(BaseCommand):
                 'report_end_user_company_country': os.getenv('METRICS_UTILITY_REPORT_END_USER_COUNTRY', ''),
                 # Renewal guidance specific params
                 'report_renewal_guidance_dedup_iterations': os.getenv('REPORT_RENEWAL_GUIDANCE_DEDUP_ITERATIONS', '3'),
-                'report_organization_filter': os.getenv('METRICS_UTILITY_ORGANIZATION_FILTER', None),
+                'report_organization_filter': os.getenv('METRICS_UTILITY_ORGANIZATION_FILTER'),
                 # optional bits
                 'optional_sheets': os.getenv(
                     'METRICS_UTILITY_OPTIONAL_CCSP_REPORT_SHEETS',
