@@ -39,7 +39,7 @@ def test_add_arguments_adds_expected_arguments(parser):
 def test_handle_ship_target_directory(monkeypatch, command_instance):
     monkeypatch.setattr(
         'metrics_utility.management.commands.build_report.handle_directory_ship_target',
-        lambda: {'ship_path': 'directory'},
+        lambda help_texts: {'ship_path': 'directory'},
     )
     assert command_instance._handle_ship_target('directory') == {'ship_path': 'directory'}
 
@@ -47,7 +47,7 @@ def test_handle_ship_target_directory(monkeypatch, command_instance):
 def test_handle_ship_target_s3(monkeypatch, command_instance):
     monkeypatch.setattr(
         'metrics_utility.management.commands.build_report.handle_s3_ship_target',
-        lambda: {'ship_path': 's3'},
+        lambda env_var_help_texts: {'ship_path': 's3'},
     )
     assert command_instance._handle_ship_target('s3') == {'ship_path': 's3'}
 
@@ -101,7 +101,14 @@ def test_handle_extra_params_all_valid(monkeypatch, command_instance):
 def test_handle_known_exceptions(monkeypatch, command_instance, exc):
     monkeypatch.setattr(
         'metrics_utility.management.commands.build_report.handle_env_validation',
-        lambda x: None,
+        lambda method: None,
+    )
+
+    # Mock _handle_extra_params to raise the specific exception being tested
+    monkeypatch.setattr(
+        command_instance,
+        '_handle_extra_params',
+        lambda ship_target: (_ for _ in ()).throw(exc),
     )
 
     with pytest.raises(MetricsException):
@@ -111,10 +118,18 @@ def test_handle_known_exceptions(monkeypatch, command_instance, exc):
 def test_handle_unexpected_exception(monkeypatch, command_instance):
     monkeypatch.setattr(
         'metrics_utility.management.commands.build_report.handle_env_validation',
-        lambda x: None,
+        lambda method: None,
     )
 
-    with pytest.raises(MetricsException):
+    # Mock _handle_extra_params to raise an unexpected exception (not a MetricsException subclass)
+    monkeypatch.setattr(
+        command_instance,
+        '_handle_extra_params',
+        lambda ship_target: (_ for _ in ()).throw(ValueError('Unexpected error')),
+    )
+
+    # The command should raise the ValueError, not wrap it in MetricsException
+    with pytest.raises(ValueError):
         command_instance.handle()
 
 

@@ -49,26 +49,51 @@ VALID_SHEETS = {
     },
 }
 VALID_COLLECTORS = {'main_host', 'main_jobevent', 'main_indirectmanagednodeaudit', 'total_workers_vcpu', ''}
-VALID_SHIP_TARGET_BUILD = {'directory', 's3', 'controller_db'}
-VALID_SHIP_TARGET_GATHER = {'directory', 's3', 'crc'}
+VALID_SHIP_TARGET_BUILD = ['directory', 'controller_db', 's3']  # Keep ordered for consistent messaging
+VALID_SHIP_TARGET_GATHER = ['directory', 's3', 'crc']  # Keep ordered for consistent messaging
 
 ship_path_description = 'place for collected data and built reports'
 
 
-def handle_directory_ship_target():
-    ship_path = os.getenv('METRICS_UTILITY_SHIP_PATH')
+def format_env_var_help(env_var_name, help_texts, fallback_description=None):
+    """Format environment variable help text with requirement status."""
+    env_var_help = help_texts.get(env_var_name, {})
+
+    # Use the same context-aware logic as help_text.py
+    ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET')
+
+    # Check if this is an S3 variable by looking for variables with required=False
+    # that contain 'bucket' in their name (S3-specific pattern)
+    is_s3_var = 'BUCKET' in env_var_name and env_var_help.get('required') is False
+
+    if is_s3_var and ship_target == 's3':
+        required_text = 'required'
+    elif env_var_help.get('required') is True:
+        required_text = 'required'
+    elif env_var_help.get('required') is False:
+        required_text = 'optional'
+    else:
+        required_text = str(env_var_help.get('required', 'required'))
+
+    description = env_var_help.get('text', fallback_description or '')
+    return f'{env_var_name} ({required_text}): {description}'
+
+
+def handle_directory_ship_target(help_texts):
+    ship_path = os.getenv('METRICS_UTILITY_SHIP_PATH', None)
 
     if not ship_path:
-        raise MissingRequiredEnvVar(f'Missing required env variable METRICS_UTILITY_SHIP_PATH - {ship_path_description}')
+        formatted_help = format_env_var_help('METRICS_UTILITY_SHIP_PATH', help_texts, ship_path_description)
+        raise MissingRequiredEnvVar(formatted_help)
 
     return {'ship_path': ship_path}
 
 
-def handle_s3_ship_target():
-    ship_path = os.getenv('METRICS_UTILITY_SHIP_PATH')
-    bucket_name = os.getenv('METRICS_UTILITY_BUCKET_NAME')
-    bucket_endpoint = os.getenv('METRICS_UTILITY_BUCKET_ENDPOINT')
-    bucket_region = os.getenv('METRICS_UTILITY_BUCKET_REGION')  # optional
+def handle_s3_ship_target(env_var_help_texts):
+    ship_path = os.getenv('METRICS_UTILITY_SHIP_PATH', None)
+    bucket_name = os.getenv('METRICS_UTILITY_BUCKET_NAME', None)
+    bucket_endpoint = os.getenv('METRICS_UTILITY_BUCKET_ENDPOINT', None)
+    bucket_region = os.getenv('METRICS_UTILITY_BUCKET_REGION', None)  # optional
 
     # S3 credentials
     bucket_access_key = os.getenv('METRICS_UTILITY_BUCKET_ACCESS_KEY')
@@ -76,19 +101,19 @@ def handle_s3_ship_target():
 
     missing = []
     if not bucket_name:
-        missing += ['METRICS_UTILITY_BUCKET_NAME - name of S3 bucket']
+        missing.append(format_env_var_help('METRICS_UTILITY_BUCKET_NAME', env_var_help_texts))
     if not bucket_endpoint:
-        missing += ['METRICS_UTILITY_BUCKET_ENDPOINT - S3 endpoint, eg. https://s3.us-east.example.com']
+        missing.append(format_env_var_help('METRICS_UTILITY_BUCKET_ENDPOINT', env_var_help_texts))
     if not bucket_access_key:
-        missing += ['METRICS_UTILITY_BUCKET_ACCESS_KEY - S3 access key']
+        missing.append(format_env_var_help('METRICS_UTILITY_BUCKET_ACCESS_KEY', env_var_help_texts))
     if not bucket_secret_key:
-        missing += ['METRICS_UTILITY_BUCKET_SECRET_KEY - S3 secret key']
+        missing.append(format_env_var_help('METRICS_UTILITY_BUCKET_SECRET_KEY', env_var_help_texts))
     if not ship_path:
-        missing += [f'METRICS_UTILITY_SHIP_PATH - {ship_path_description}']
+        missing.append(format_env_var_help('METRICS_UTILITY_SHIP_PATH', env_var_help_texts, ship_path_description))
     # bucket_region is optional
 
     if missing:
-        raise MissingRequiredEnvVar(f'Missing some required env variables for S3 configuration, namely: {", ".join(missing)}.')
+        raise MissingRequiredEnvVar(f'Missing some required env variables for S3 configuration: {", ".join(missing)}.')
 
     # S3Handler params
     return {
@@ -130,7 +155,7 @@ def handle_crc_ship_target():
             raise MissingRequiredEnvVar('METRICS_UTILITY_BILLING_ACCOUNT_ID, containing AWS 12 digit customer id needs to be provided.')
         billing_provider_params['billing_account_id'] = billing_account_id
     else:
-        raise MissingRequiredEnvVar('Uknown METRICS_UTILITY_BILLING_PROVIDER env var, supported values are [aws].')
+        raise MissingRequiredEnvVar('self.Uknown METRICS_UTILITY_BILLING_PROVIDER env var, supported values are [aws].')
 
     if red_hat_org_id:
         billing_provider_params['red_hat_org_id'] = red_hat_org_id
@@ -138,7 +163,7 @@ def handle_crc_ship_target():
     # only used for the other modes
     ship_path = os.getenv('METRICS_UTILITY_SHIP_PATH')
     if ship_path:
-        allowed = '", "'.join(['controller_db', 'directory', 's3'])
+        allowed = '", "'.join(VALID_SHIP_TARGET_BUILD)
         logger.warning(f'Ignoring METRICS_UTILITY_SHIP_PATH used without METRICS_UTILITY_SHIP_TARGET="{allowed}"')
 
     return billing_provider_params
@@ -288,7 +313,7 @@ def validate_ship_path(errors, ship_target, method):
         # already handled in handle_*_ship_target
         return
 
-    if method == 'build' and ship_target in VALID_SHIP_TARGET_BUILD - {'s3'} and not os.path.isdir(ship_path):
+    if method == 'build' and ship_target in set(VALID_SHIP_TARGET_BUILD) - {'s3'} and not os.path.isdir(ship_path):
         errors.append(f'Invalid METRICS_UTILITY_SHIP_PATH: {ship_path} is not an existing directory.')
 
 
@@ -483,8 +508,8 @@ def parse_since_until(options, help_texts):
     return since, until
 
 
-def validate_build_params(options, help_texts):
-    report_type = os.getenv('METRICS_UTILITY_REPORT_TYPE')
+def validate_build_params(options, param_help_texts):
+    report_type = os.getenv('METRICS_UTILITY_REPORT_TYPE', None)
     if not report_type:
         return None, None
 
@@ -492,9 +517,9 @@ def validate_build_params(options, help_texts):
         validate_ccsp_params(options)
 
     if report_type in {'RENEWAL_GUIDANCE'}:
-        validate_renewal_params(options, help_texts)
+        validate_renewal_params(options, param_help_texts)
 
-    return parse_since_until(options, help_texts)
+    return parse_since_until(options, param_help_texts)
 
 
 def parse_number_of_days(date_option):

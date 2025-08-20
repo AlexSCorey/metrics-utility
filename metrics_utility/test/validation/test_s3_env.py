@@ -12,6 +12,7 @@ unset = {
     'METRICS_UTILITY_BUCKET_NAME': None,
     'METRICS_UTILITY_BUCKET_REGION': None,
     'METRICS_UTILITY_BUCKET_SECRET_KEY': None,
+    'METRICS_UTILITY_SHIP_PATH': None,
 }
 
 
@@ -74,7 +75,10 @@ def test_build_controller_db():
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_SHIP_PATH - place for collected data and built reports'
+    assert (
+        e.name
+        == 'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/'
+    )
 
     e = expect_build_error(
         {
@@ -83,7 +87,9 @@ def test_build_controller_db():
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_REPORT_TYPE.'
+    assert (
+        e.name == "METRICS_UTILITY_REPORT_TYPE (required): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'. Determines which kind of report is generated"
+    )
 
 
 def test_gather_crc(caplog):
@@ -99,7 +105,7 @@ def test_gather_crc(caplog):
             'dry-run': True,
         },
     )
-    assert caplog.messages[0] == 'Ignoring METRICS_UTILITY_SHIP_PATH used without METRICS_UTILITY_SHIP_TARGET="controller_db", "directory", "s3"'
+    assert caplog.messages[0] == 'Ignoring METRICS_UTILITY_SHIP_PATH used without METRICS_UTILITY_SHIP_TARGET="directory", "controller_db", "s3"'
 
 
 def test_build_directory(caplog):
@@ -110,7 +116,10 @@ def test_build_directory(caplog):
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_SHIP_PATH - place for collected data and built reports'
+    assert (
+        e.name
+        == 'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/'
+    )
 
     e = expect_build_error(
         {
@@ -121,7 +130,9 @@ def test_build_directory(caplog):
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_REPORT_TYPE.'
+    assert (
+        e.name == "METRICS_UTILITY_REPORT_TYPE (required): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'. Determines which kind of report is generated"
+    )
     assert caplog.messages[-1] == 'Ignoring env variables used without METRICS_UTILITY_SHIP_TARGET="s3": METRICS_UTILITY_BUCKET_NAME'
     assert caplog.messages[-2] == 'Ignoring env variables used without METRICS_UTILITY_SHIP_TARGET="crc": METRICS_UTILITY_BILLING_PROVIDER'
 
@@ -133,7 +144,10 @@ def test_gather_directory():
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_SHIP_PATH - place for collected data and built reports'
+    (
+        e.name
+        == 'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/'
+    )
 
     run_gather_int(
         {
@@ -155,13 +169,13 @@ def test_build_s3():
         },
         MissingRequiredEnvVar,
     )
-    assert (
-        e.name == 'Missing some required env variables for S3 configuration, namely: '
-        'METRICS_UTILITY_BUCKET_NAME - name of S3 bucket, '
-        'METRICS_UTILITY_BUCKET_ENDPOINT - S3 endpoint, eg. https://s3.us-east.example.com, '
-        'METRICS_UTILITY_BUCKET_ACCESS_KEY - S3 access key, '
-        'METRICS_UTILITY_BUCKET_SECRET_KEY - S3 secret key, '
-        'METRICS_UTILITY_SHIP_PATH - place for collected data and built reports.'
+    assert e.name == (
+        'Missing some required env variables for S3 configuration: '
+        'METRICS_UTILITY_BUCKET_NAME (required): s3 bucket name to which save the report, '
+        'METRICS_UTILITY_BUCKET_ENDPOINT (required): s3 bucket endpoint, '
+        'METRICS_UTILITY_BUCKET_ACCESS_KEY (required): s3 bucket access key, '
+        'METRICS_UTILITY_BUCKET_SECRET_KEY (required): s3 bucket secret key, '
+        'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/.'
     )
 
     e = expect_build_error(
@@ -175,7 +189,9 @@ def test_build_s3():
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_REPORT_TYPE.'
+    assert (
+        e.name == "METRICS_UTILITY_REPORT_TYPE (required): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'. Determines which kind of report is generated"
+    )
 
     e = expect_build_error(
         {
@@ -189,7 +205,9 @@ def test_build_s3():
         },
         MissingRequiredEnvVar,
     )
-    assert e.name == 'Missing required env variable METRICS_UTILITY_REPORT_TYPE.'
+    assert (
+        e.name == "METRICS_UTILITY_REPORT_TYPE (required): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'. Determines which kind of report is generated"
+    )
 
 
 def test_gather_s3():
@@ -200,12 +218,12 @@ def test_gather_s3():
         MissingRequiredEnvVar,
     )
     assert (
-        e.name == 'Missing some required env variables for S3 configuration, namely: '
-        'METRICS_UTILITY_BUCKET_NAME - name of S3 bucket, '
-        'METRICS_UTILITY_BUCKET_ENDPOINT - S3 endpoint, eg. https://s3.us-east.example.com, '
-        'METRICS_UTILITY_BUCKET_ACCESS_KEY - S3 access key, '
-        'METRICS_UTILITY_BUCKET_SECRET_KEY - S3 secret key, '
-        'METRICS_UTILITY_SHIP_PATH - place for collected data and built reports.'
+        e.name == 'Missing some required env variables for S3 configuration: '
+        'METRICS_UTILITY_BUCKET_NAME (required): s3 bucket name to which save the report, '
+        'METRICS_UTILITY_BUCKET_ENDPOINT (required): s3 bucket endpoint, '
+        'METRICS_UTILITY_BUCKET_ACCESS_KEY (required): s3 bucket access key, '
+        'METRICS_UTILITY_BUCKET_SECRET_KEY (required): s3 bucket secret key, '
+        'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/.'
     )
 
     run_gather_int(

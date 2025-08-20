@@ -68,7 +68,14 @@ def test_command_help(capsys):
 )
 def test_handle_known_exceptions(monkeypatch, command_instance, exc):
     handle_env_validation = 'metrics_utility.management.commands.gather_automation_controller_billing_data.handle_env_validation'
-    monkeypatch.setattr(handle_env_validation, lambda x: None)
+    monkeypatch.setattr(handle_env_validation, lambda method: None)
+
+    # Mock _handle_ship_target to raise the specific exception being tested
+    monkeypatch.setattr(
+        command_instance,
+        '_handle_ship_target',
+        lambda ship_target: (_ for _ in ()).throw(exc),
+    )
 
     with pytest.raises(MetricsException):
         command_instance.handle()
@@ -76,9 +83,17 @@ def test_handle_known_exceptions(monkeypatch, command_instance, exc):
 
 def test_handle_unexpected_exception(monkeypatch, command_instance):
     handle_env_validation = 'metrics_utility.management.commands.gather_automation_controller_billing_data.handle_env_validation'
-    monkeypatch.setattr(handle_env_validation, lambda x: None)
+    monkeypatch.setattr(handle_env_validation, lambda method: None)
 
-    with pytest.raises(MetricsException):
+    # Mock _handle_ship_target to raise an unexpected exception (not a MetricsException subclass)
+    monkeypatch.setattr(
+        command_instance,
+        '_handle_ship_target',
+        lambda ship_target: (_ for _ in ()).throw(ValueError('Unexpected error')),
+    )
+
+    # The command should raise the ValueError, not wrap it in MetricsException
+    with pytest.raises(ValueError):
         command_instance.handle()
 
 
@@ -98,7 +113,7 @@ def test_handle_ship_target_directory(monkeypatch, command_instance):
     monkeypatch.setattr(handle_not_s3, lambda: None)
     monkeypatch.setattr(
         handle_directory_ship_target,
-        lambda: {'ship_path': 'directory'},
+        lambda help_texts: {'ship_path': 'directory'},
     )
     assert command_instance._handle_ship_target('directory') == {'ship_path': 'directory'}
 
@@ -107,7 +122,7 @@ def test_handle_ship_target_s3(monkeypatch, command_instance):
     handle_not_crc = 'metrics_utility.management.commands.gather_automation_controller_billing_data.handle_not_crc'
     handle_s3_ship_target = 'metrics_utility.management.commands.gather_automation_controller_billing_data.handle_s3_ship_target'
     monkeypatch.setattr(handle_not_crc, lambda: None)
-    monkeypatch.setattr(handle_s3_ship_target, lambda: {'ship_path': 's3'})
+    monkeypatch.setattr(handle_s3_ship_target, lambda env_var_help_texts: {'ship_path': 's3'})
     assert command_instance._handle_ship_target('s3') == {'ship_path': 's3'}
 
 

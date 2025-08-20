@@ -1,5 +1,7 @@
 import os
 
+from argparse import RawDescriptionHelpFormatter
+
 from django.core.management.base import BaseCommand
 
 from metrics_utility.automation_controller_billing.collector import Collector
@@ -8,8 +10,8 @@ from metrics_utility.exceptions import (
     NoAnalyticsCollected,
 )
 from metrics_utility.logger import debug, logger
+from metrics_utility.management.help_text import HelpTextGenerator
 from metrics_utility.management.validation import (
-    date_format_text,
     handle_crc_ship_target,
     handle_directory_ship_target,
     handle_env_validation,
@@ -25,21 +27,31 @@ class Command(BaseCommand):
     Gather Automation Controller billing data
     """
 
-    help = 'Gather Automation Controller billing data'
-    help_texts = {
-        'since': (f'Start date for collection, including. {date_format_text.format(name="since")}'),
-        'until': (f'End date for collection, excluding. {date_format_text.format(name="until")}'),
-        'dry-run': ('Gather billing metrics without shipping.'),
-        'ship': ('Enable shipping of billing metrics to the console.redhat.com'),
-        'verbose': ('Print debug information to console.'),
-    }
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.help_generator = HelpTextGenerator()
+        self.help = self.help_generator.gather_help_title
+        self.help_texts = self.help_generator.gather_param_help_texts
+
+    def create_parser(self, prog_name, subcommand, **kwargs):
+        # Delay property evaluation until help is actually displayed
+        parser = super().create_parser(
+            prog_name,
+            subcommand,
+            formatter_class=RawDescriptionHelpFormatter,
+            **kwargs,
+        )
+        # Set epilog dynamically
+        parser.epilog = self.help_generator.gather_env_var_help_text
+        return parser
 
     def add_arguments(self, parser):
-        parser.add_argument('--dry-run', dest='dry-run', action='store_true', help=self.help_texts.get('dry-run'))
-        parser.add_argument('--ship', dest='ship', action='store_true', help=self.help_texts.get('ship'))
-        parser.add_argument('--since', dest='since', action='store', help=self.help_texts.get('since'))
-        parser.add_argument('--until', dest='until', action='store', help=self.help_texts.get('until'))
-        parser.add_argument('--verbose', dest='verbose', action='store_true', help=self.help_texts.get('verbose'))
+        help_texts = self.help_generator.gather_param_help_texts
+        parser.add_argument('--dry-run', dest='dry-run', action='store_true', help=help_texts.get('dry-run'))
+        parser.add_argument('--ship', dest='ship', action='store_true', help=help_texts.get('ship'))
+        parser.add_argument('--since', dest='since', action='store', help=help_texts.get('since'))
+        parser.add_argument('--until', dest='until', action='store', help=help_texts.get('until'))
+        parser.add_argument('--verbose', dest='verbose', action='store_true', help=help_texts.get('verbose'))
 
     def handle(self, *args, **options):
         if options.get('verbose'):
@@ -51,8 +63,8 @@ class Command(BaseCommand):
         opt_ship = options.get('ship')
         opt_dry_run = options.get('dry-run')
 
-        since = parse_date_param(opt_since, self.help_texts, 'since')
-        until = parse_date_param(opt_until, self.help_texts, 'until')
+        since = parse_date_param(opt_since, self.help_generator.gather_param_help_texts, 'since')
+        until = parse_date_param(opt_until, self.help_generator.gather_param_help_texts, 'until')
 
         ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET')
         extra_params = self._handle_ship_target(ship_target)
@@ -81,10 +93,10 @@ class Command(BaseCommand):
         elif ship_target == 'directory':
             handle_not_crc()
             handle_not_s3()
-            return handle_directory_ship_target()
+            return handle_directory_ship_target(self.help_generator.env_var_help_texts)
         elif ship_target == 's3':
             handle_not_crc()
-            return handle_s3_ship_target()
+            return handle_s3_ship_target(self.help_generator.env_var_help_texts)
         else:
             allowed = ', '.join(['crc', 'directory', 's3'])
             raise BadShipTarget(f'Unexpected value for METRICS_UTILITY_SHIP_TARGET env var ({ship_target}), allowed values: {allowed}')

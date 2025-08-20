@@ -12,8 +12,9 @@ from metrics_utility.automation_controller_billing.report.factory import Factory
 from metrics_utility.automation_controller_billing.report_saver.factory import Factory as ReportSaverFactory
 from metrics_utility.exceptions import BadRequiredEnvVar, BadShipTarget, MissingRequiredEnvVar
 from metrics_utility.logger import debug, logger
+from metrics_utility.management.help_text import HelpTextGenerator
 from metrics_utility.management.validation import (
-    date_format_text,
+    format_env_var_help,
     handle_directory_ship_target,
     handle_env_validation,
     handle_month,
@@ -44,55 +45,33 @@ class Command(BaseCommand):
     Build Report
     """
 
-    help = 'Build Report'
-    help_texts = {
-        'since': (f'Start date for collection, including. {date_format_text.format(name="since")}'),
-        'until': (f'End date for collection, including. {date_format_text.format(name="until")}'),
-        'month': (
-            'Month the report will be generated for, with format YYYY-MM. '
-            "If this parameter is not provided, the previous month's report will be generated if it does not already exist."
-        ),
-        'ephemeral': (
-            'Duration in months or days to determine if host is ephemeral. '
-            'Months are considered as 30 days in duration. '
-            'Example: --ephemeral=3months, or --ephemeral=3days'
-        ),
-        'force': ('With this option, the existing reports will be overwritten if running this command again.'),
-        'verbose': ('Print debug information to console.'),
-    }
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.help_generator = HelpTextGenerator()
+
+        self.help = self.help_generator.build_report_help_title
+        self.help_texts = self.help_generator.build_report_param_help_texts
 
     def create_parser(self, prog_name, subcommand, **kwargs):
-        return super().create_parser(
+        # Delay property evaluation until help is actually displayed
+        parser = super().create_parser(
             prog_name,
             subcommand,
-            # ensure newlines are preserved in descriptions and epilog
             formatter_class=RawDescriptionHelpFormatter,
-            epilog='\n'.join(
-                [
-                    'ENVIRONMENT',
-                    "    METRICS_UTILITY_REPORT_TYPE (required, case sensitive): one of 'CCSPv2', 'CCSP', 'RENEWAL_GUIDANCE'",
-                    "        determines which kind of report we're generating",
-                    '',
-                    "    METRICS_UTILITY_SHIP_TARGET (required): one of 'directory', 's3', 'controller_db'",
-                    '        input/output mechanism',
-                    '',
-                    '    METRICS_UTILITY_SHIP_PATH (required): a path',
-                    '        local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/',
-                    '',
-                    "    METRICS_UTILITY_DEDUPLICATOR (optional): one of 'ccsp', 'renewal', 'ccsp-experimental'",
-                    "        choice of deduplication algorithm, defaults to 'ccsp' or 'renewal' based on the chosen report type",
-                ]
-            ),
             **kwargs,
         )
+        # Set epilog dynamically
+        parser.epilog = self.help_generator.build_report_env_var_help_text
+        return parser
 
     def add_arguments(self, parser):
-        parser.add_argument('--month', dest='month', action='store', help=self.help_texts.get('month'))
-        parser.add_argument('--since', dest='since', action='store', help=self.help_texts.get('since'))
-        parser.add_argument('--until', dest='until', action='store', help=self.help_texts.get('until'))
-        parser.add_argument('--ephemeral', dest='ephemeral', action='store', help=self.help_texts.get('ephemeral'))
-        parser.add_argument('--force', dest='force', action='store_true', help=self.help_texts.get('force'))
-        parser.add_argument('--verbose', dest='verbose', action='store_true', help=self.help_texts.get('verbose'))
+        help_texts = self.help_generator.build_report_param_help_texts
+        parser.add_argument('--month', dest='month', action='store', help=help_texts.get('month'))
+        parser.add_argument('--since', dest='since', action='store', help=help_texts.get('since'))
+        parser.add_argument('--until', dest='until', action='store', help=help_texts.get('until'))
+        parser.add_argument('--ephemeral', dest='ephemeral', action='store', help=help_texts.get('ephemeral'))
+        parser.add_argument('--force', dest='force', action='store_true', help=help_texts.get('force'))
+        parser.add_argument('--verbose', dest='verbose', action='store_true', help=help_texts.get('verbose'))
 
     def handle(self, *args, **options):
         if options.get('verbose'):
@@ -100,7 +79,7 @@ class Command(BaseCommand):
 
         handle_env_validation('build')
 
-        opt_since, opt_until = validate_build_params(options, self.help_texts)
+        opt_since, opt_until = validate_build_params(options, self.help_generator.build_report_param_help_texts)
 
         opt_month, month, next_month = handle_month(options.get('month') or None)
         opt_ephemeral = parse_number_of_days(options.get('ephemeral'))
@@ -177,10 +156,10 @@ class Command(BaseCommand):
             # controller_db is just directory but with different extractor
             handle_not_crc()
             handle_not_s3()
-            return handle_directory_ship_target()
+            return handle_directory_ship_target(self.help_generator.env_var_help_texts)
         elif ship_target == 's3':
             handle_not_crc()
-            return handle_s3_ship_target()
+            return handle_s3_ship_target(self.help_generator.env_var_help_texts)
         else:
             allowed = ', '.join(['controller_db', 'directory', 's3'])
             raise BadShipTarget(f'Unexpected value for METRICS_UTILITY_SHIP_TARGET env var ({ship_target}), allowed values: {allowed}')
@@ -192,7 +171,7 @@ class Command(BaseCommand):
         price_per_node = float(os.getenv('METRICS_UTILITY_PRICE_PER_NODE', 0))
 
         if not report_type:
-            raise MissingRequiredEnvVar('Missing required env variable METRICS_UTILITY_REPORT_TYPE.')
+            raise MissingRequiredEnvVar(format_env_var_help('METRICS_UTILITY_REPORT_TYPE', self.help_generator.env_var_help_texts))
 
         if report_type not in ['CCSP', 'CCSPv2', 'RENEWAL_GUIDANCE']:
             raise BadRequiredEnvVar(

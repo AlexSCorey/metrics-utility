@@ -10,6 +10,82 @@ from metrics_utility.logger import logger
 
 
 class ManagementUtility(management.ManagementUtility):
+    def main_help_text(self, commands_only=False):
+        """
+        Return the script's main help text, as a string.
+        """
+        if commands_only:
+            usage = sorted(self.get_commands())
+        else:
+            usage = [
+                '',
+                "Type 'manage.py help <subcommand>' for help on a specific subcommand.",
+                '',
+                'Available subcommands:',
+            ]
+            commands_dict = self.get_commands()
+
+            # First show custom commands with detailed help
+            custom_commands = ['build_report', 'gather_automation_controller_billing_data']
+            for name in sorted(custom_commands):
+                if name in commands_dict:
+                    usage.append('')
+                    app_name = commands_dict[name]
+                    try:
+                        command = self.fetch_command(name)
+                        help_text = command.help if hasattr(command, 'help') else 'No help available'
+                        usage.append(f'[{app_name}]')
+                        usage.append(f'    {name}')
+                        usage.append(f'        {help_text}')
+                        if hasattr(command, 'help_generator'):
+                            # Add environment variable help sections
+                            if name == 'build_report':
+                                usage.append('')
+                                usage.append('        Environment Variables for build_report:')
+                                # Use the existing help text generator logic
+                                ship_target = os.getenv('METRICS_UTILITY_SHIP_TARGET')
+                                all_sections = {
+                                    **command.help_generator.build_report_env_var_help_texts,
+                                    **command.help_generator.env_vars_for_build_and_gather,
+                                }
+                                for section_key, section_data in all_sections.items():
+                                    section_lines = command.help_generator.format_help_text_section(section_key, section_data, ship_target)
+                                    # Adjust indentation for main help context (add 6 spaces to each line)
+                                    for line in section_lines:
+                                        if line.strip():  # Only indent non-empty lines
+                                            usage.append(f'      {line}')
+                                        else:
+                                            usage.append('')
+                            elif name == 'gather_automation_controller_billing_data':
+                                usage.append('')
+                                usage.append('        Environment Variables for gather_automation_controller_billing_data:')
+                                # Use the existing help text generator logic
+                                all_sections = {
+                                    **command.help_generator.gather_env_var_help_texts,
+                                    **command.help_generator.env_vars_for_build_and_gather,
+                                }
+                                for section_key, section_data in all_sections.items():
+                                    section_lines = command.help_generator.format_help_text_section(section_key, section_data, ship_target)
+                                    # Adjust indentation for main help context (add 6 spaces to each line)
+                                    for line in section_lines:
+                                        if line.strip():  # Only indent non-empty lines
+                                            usage.append(f'      {line}')
+                                        else:
+                                            usage.append('')
+                    except Exception:
+                        usage.append(f'[{app_name}]')
+                        usage.append(f'    {name}')
+
+            # Then show Django built-in commands in a separate section
+            django_commands = [name for name in sorted(commands_dict) if name not in custom_commands]
+            if django_commands:
+                usage.append('')
+                usage.append('')
+                usage.append('[django]')
+                for name in django_commands:
+                    usage.append(f'    {name}')
+        return '\n'.join(usage)
+
     def execute(self):
         """
         Given the command-line arguments, figure out which subcommand is being
@@ -56,13 +132,6 @@ class ManagementUtility(management.ManagementUtility):
             sys.stdout.write(self.main_help_text() + '\n')
         else:
             self.run_subcommand(subcommand, self.argv)
-
-    def main_help_text(self, commands_only=False):
-        commands = 'Commands: build_report, gather_automation_controller_billing_data'
-        if commands_only:
-            return commands
-        else:
-            return f'Usage: {os.path.basename(sys.argv[0])} <command> [options]\n{commands}'
 
     def fetch_command(self, subcommand):
         try:

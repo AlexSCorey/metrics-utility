@@ -3,6 +3,7 @@ import tempfile
 import pytest
 
 from metrics_utility.exceptions import MissingRequiredEnvVar
+from metrics_utility.management.help_text import HelpTextGenerator
 from metrics_utility.management.validation import (
     handle_directory_ship_target,
     handle_env_validation,
@@ -232,8 +233,11 @@ def test_validate_ship_path_build_valid(monkeypatch):
 
 def test_validate_ship_path_build_empty_build_valid(monkeypatch):
     with pytest.raises(MissingRequiredEnvVar) as excinfo:
-        handle_directory_ship_target()
-    assert str(excinfo.value).startswith('Missing required env variable METRICS_UTILITY_SHIP_PATH')
+        help_text_generator = HelpTextGenerator()
+        handle_directory_ship_target(help_text_generator.env_var_help_texts)
+    assert str(excinfo.value).startswith(
+        'METRICS_UTILITY_SHIP_PATH (required): A path - local or s3 directory path, input tarballs in path/data/, output xlsx in path/reports/'
+    )
 
 
 def test_validate_ship_path_build_empty_gather_valid(monkeypatch):
