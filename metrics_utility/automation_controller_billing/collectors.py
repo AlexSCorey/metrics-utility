@@ -4,6 +4,7 @@ import os.path
 import platform
 
 from datetime import datetime, timezone
+from typing import Tuple
 
 import distro
 
@@ -14,13 +15,13 @@ from django.db import connection
 from django.db.utils import ProgrammingError
 from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
-from kubernetes import client
-from kubernetes import config as kube_config
 
 from metrics_utility.base import CsvFileSplitter, register
 from metrics_utility.base.utils import get_max_gather_period_days, get_optional_collectors
 from metrics_utility.exceptions import MetricsException, MissingRequiredEnvVar
 from metrics_utility.logger import logger, logger_info_level
+
+from .prometheus_client import PrometheusClient
 
 
 """
@@ -551,10 +552,17 @@ def total_workers_vcpu(since, full_path, until, **kwargs):
         raise MissingRequiredEnvVar('environment variable METRICS_UTILITY_CLUSTER_NAME is not set')
 
     now = datetime.now(timezone.utc)
+    current_ts = now.timestamp()
+    prev_hour_start, prev_hour_end = get_hour_boundaries(current_ts)
 
-    info = {'cluster_name': cluster_name, 'timestamp': now.isoformat(), 'nodes': []}
-    # If METRICS_UTILITY_USAGE_BASED_BILLING_ENABLED is not set or set to false then it returns 1
-    usage_based_billing_enabled_str = os.getenv('METRICS_UTILITY_USAGE_BASED_BILLING_ENABLED')
+    info = {
+        'cluster_name': cluster_name,
+        'collection_timestamp': datetime.fromtimestamp(current_ts).isoformat(),
+        'start_timestamp': datetime.fromtimestamp(prev_hour_start).isoformat(),
+        'end_timestamp': datetime.fromtimestamp(prev_hour_end).isoformat(),
+    }
+    # If METRICS_UTILITY_USAGE_BASED_METERING_ENABLED is not set or set to false then it returns 1
+    usage_based_billing_enabled_str = os.getenv('METRICS_UTILITY_USAGE_BASED_METERING_ENABLED')
     usage_based_billing_enabled = False
     if usage_based_billing_enabled_str and (usage_based_billing_enabled_str.lower() == 'true'):
         usage_based_billing_enabled = True
@@ -563,42 +571,89 @@ def total_workers_vcpu(since, full_path, until, **kwargs):
         info['total_workers_vcpu'] = 1
         # This message must always appear in the log regardless of the log level.
         logger_info_level.info(json.dumps(info, indent=2))
-        return {'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}
+        return {'timestamp': info['end_timestamp'], 'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}
+
+    url = os.getenv('METRICS_UTILITY_PROMETHEUS_URL')
+    if not url:
+        prometheus_default_url = 'https://prometheus-k8s.openshift-monitoring.svc.cluster.local:9091'
+        logger.info(
+            f'environment variable METRICS_UTILITY_PROMETHEUS_URL is not set, \
+                    default {prometheus_default_url} will be assigned'
+        )
+        url = prometheus_default_url
 
     try:
-        kube_config.load_incluster_config()
-    except kube_config.ConfigException:
-        try:
-            kube_config.load_kube_config()
-        except kube_config.ConfigException as e:
-            logger.error(f'Could not configure Kubernetes Python client ERROR: {e}')
-            raise MetricsException(f'Could not configure Kubernetes Python client ERROR: {e}')
-
-    # Create a CoreV1Api client
-    api_instance = client.CoreV1Api()
-    if not api_instance:
-        raise MetricsException('Could not get a Kube CoreV1Api client')
-
-    try:
-        nodes = api_instance.list_node()
+        prom = PrometheusClient(url=url)
     except Exception as e:
+        raise MetricsException(f'Can not create a prometheus api client ERROR: {e}')
+
+    try:
+        total_workers_vcpu, promql_query = get_total_workers_cpu(prom, prev_hour_start)
+        timeline = get_cpu_timeline(prom, prev_hour_start, prev_hour_end)
+    except MetricsException as e:
         raise MetricsException(f'Unexpected error when retrieving nodes: {e}')
 
-    if nodes is None:
-        raise MetricsException('No nodes found')
+    info['promql_query'] = promql_query
+    info['timeline'] = timeline
 
-    total_workers_vcpu = 0
-    # In SaaS case we have only Worker nodes and so we don't need to filter out the control plan.
-    # If it used for other environement, we might need to implement the filtering.
-    for node_info in nodes.items:
-        for resource, value in node_info.status.capacity.items():
-            if resource == 'cpu':
-                info['nodes'].append({node_info.metadata.name: int(value)})
-                total_workers_vcpu += int(value)
+    logger.debug(f'total_workers_vcpu: {total_workers_vcpu}')
 
-    info['total_workers_vcpu'] = total_workers_vcpu
+    # This can happen when the prev_hour_start doesn't have data, it could be when the cluster just started or
+    # if for some reasons prometheus loss some data.
+    if total_workers_vcpu is None:
+        logger.warning('No data availble yet, the cluster is probably running for less than an hour')
+        raise MetricsException('No data availble yet, the cluster is probably running for less than an hour')
+
+    info['total_workers_vcpu'] = int(total_workers_vcpu)
 
     # This message must always appear in the log regardless of the log level.
     logger_info_level.info(json.dumps(info, indent=2))
 
-    return {'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}
+    return {'timestamp': info['end_timestamp'], 'cluster_name': info['cluster_name'], 'total_workers_vcpu': info['total_workers_vcpu']}
+
+
+def get_hour_boundaries(current_timestamp: float) -> Tuple[float, float, float]:
+    current_hour_start = (current_timestamp // 3600) * 3600
+    previous_hour_start = current_hour_start - 3600
+    previous_hour_end = current_hour_start - 1
+    return previous_hour_start, previous_hour_end
+
+
+def get_total_workers_cpu(prom: PrometheusClient, base_timestamp: float) -> Tuple[float, str]:
+    promql_query = f'max_over_time(sum(machine_cpu_cores)[59m59s:5m] @ {base_timestamp})'
+
+    try:
+        total_workers_vcpu = prom.get_current_value(promql_query)
+    except Exception as e:
+        raise MetricsException(f'Unexpected error when retrieving nodes: {e}')
+
+    return total_workers_vcpu, promql_query
+
+
+def get_cpu_timeline(prom: PrometheusClient, previous_hour_start, previous_hour_end: float) -> list:
+    """
+    Get array of timestamp/CPU pairs for the hour leading up to previous_hour_end
+    Returns:
+        List of dicts with 'timestamp' (ISO format) and 'cpu_sum' keys
+    """
+    # Use instant query - query_range will handle the time range
+    query = 'sum(machine_cpu_cores)'
+
+    try:
+        response = prom.query_range(query=query, start_time=previous_hour_start, end_time=previous_hour_end, step='5m')
+
+        result = []
+        if response and 'data' in response and 'result' in response['data']:
+            for series in response['data']['result']:
+                if 'values' in series:
+                    for timestamp_val, cpu_val in series['values']:
+                        result.append(
+                            {'timestamp': datetime.fromtimestamp(float(timestamp_val), timezone.utc).isoformat(), 'cpu_sum': float(cpu_val)}
+                        )
+
+        # Sort by timestamp
+        result.sort(key=lambda x: x['timestamp'])
+        return result
+
+    except Exception as e:
+        raise MetricsException(f'Error querying CPU timeline: {e}')
