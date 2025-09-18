@@ -361,6 +361,7 @@ $yaml$,
   FOR i IN 1..job_count LOOP
     INSERT INTO public.main_unifiedjob (
       created,
+      finished,
       modified,
       description,
       name,
@@ -388,6 +389,7 @@ $yaml$,
     )
     VALUES (
       TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- created
+      TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- finished
       TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- modified
       ''::text,                               -- description
       'default_unified_job_' || random_suffix, -- name
@@ -537,6 +539,148 @@ $yaml$,
                array_length(unified_jobs,1),
                array_length(host_ids,1);
 
+  -- Ensure hourly partition exists for 2025-06-13 10:00
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = 'public' AND table_name = 'main_jobevent_20250613_10'
+  ) THEN
+    EXECUTE 'CREATE TABLE public.main_jobevent_20250613_10 (LIKE public.main_jobevent INCLUDING DEFAULTS INCLUDING CONSTRAINTS)';
+    EXECUTE 'ALTER TABLE public.main_jobevent ATTACH PARTITION public.main_jobevent_20250613_10 FOR VALUES FROM (''2025-06-13 10:00:00+00'') TO (''2025-06-13 11:00:00+00'')';
+  END IF;
+
+  -- Job Events (two per job-host), timestamps use fixed literal
+  FOR i IN array_lower(unified_jobs,1)..array_upper(unified_jobs,1) LOOP
+    unified_job_id := unified_jobs[i];
+
+    FOREACH host_id IN ARRAY host_ids LOOP
+      -- get host name
+      SELECT name INTO host_name FROM public.main_host WHERE id = host_id;
+
+      -- event 1
+      INSERT INTO public.main_jobevent (
+        created,
+        modified,
+        event,
+        event_data,
+        failed,
+        changed,
+        host_name,
+        play,
+        role,
+        task,
+        counter,
+        host_id,
+        job_id,
+        uuid,
+        parent_uuid,
+        end_line,
+        playbook,
+        start_line,
+        stdout,
+        verbosity,
+        job_created
+      ) VALUES (
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+        'runner_on_start',
+        '{}'::text,
+        false,
+        false,
+        host_name,
+        'default_play',
+        'default_role',
+        'default_task',
+        1,
+        host_id,
+        unified_job_id,
+        'UUID',
+        '',
+        1,
+        'default_playbook.yml',
+        1,
+        ''::text,
+        0,
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00'
+      );
+
+      -- event 2
+      INSERT INTO public.main_jobevent (
+        created,
+        modified,
+        event,
+        event_data,
+        failed,
+        changed,
+        host_name,
+        play,
+        role,
+        task,
+        counter,
+        host_id,
+        job_id,
+        uuid,
+        parent_uuid,
+        end_line,
+        playbook,
+        start_line,
+        stdout,
+        verbosity,
+        job_created
+      ) VALUES (
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+        'runner_on_ok',
+        '{}'::text,
+        false,
+        false,
+        host_name,
+        'default_play',
+        'default_role',
+        'default_task',
+        2,
+        host_id,
+        unified_job_id,
+        'UUID',
+        '',
+        2,
+        'default_playbook.yml',
+        2,
+        'ok: ' || host_name,
+        0,
+        TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00'
+      );
+    END LOOP;
+  END LOOP;
+  --
+  -- Execution Environments
+  --
+  INSERT INTO public.main_executionenvironment (
+    created,
+    modified,
+    description,
+    image,
+    managed,
+    name,
+    pull
+) VALUES 
+(
+    TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+    TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+    'Python 3.11 environment with common ML libraries',
+    'registry.example.com/envs/python-ml:3.11',
+    TRUE,
+    'Python ML Environment',
+    'always'
+),
+(
+    TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+    TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
+    'Node.js 20 environment for backend services',
+    'registry.example.com/envs/node-backend:20',
+    FALSE,
+    'Node Backend Environment',
+    'missing'
+);
 END
 $$;
 

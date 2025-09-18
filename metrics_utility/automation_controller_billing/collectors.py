@@ -657,3 +657,267 @@ def get_cpu_timeline(prom: PrometheusClient, previous_hour_start, previous_hour_
 
     except Exception as e:
         raise MetricsException(f'Error querying CPU timeline: {e}')
+
+
+@register('unified_jobs', '1.4', format='csv', description=_('Data on jobs run'), fnc_slicing=daily_slicing)
+def unified_jobs_table(since, full_path, until, **kwargs):
+    if 'unified_jobs' not in get_optional_collectors():
+        return None
+
+    unified_job_query = """COPY (SELECT main_unifiedjob.id,
+                                 main_unifiedjob.polymorphic_ctype_id,
+                                 django_content_type.model,
+                                 main_unifiedjob.organization_id,
+                                 main_organization.name as organization_name,
+                                 main_executionenvironment.image as execution_environment_image,
+                                 main_job.inventory_id,
+                                 main_inventory.name as inventory_name,
+                                 main_unifiedjob.created,
+                                 main_unifiedjob.name,
+                                 main_unifiedjob.unified_job_template_id,
+                                 main_unifiedjob.launch_type,
+                                 main_unifiedjob.schedule_id,
+                                 main_unifiedjob.execution_node,
+                                 main_unifiedjob.controller_node,
+                                 main_unifiedjob.cancel_flag,
+                                 main_unifiedjob.status,
+                                 main_unifiedjob.failed,
+                                 main_unifiedjob.started,
+                                 main_unifiedjob.finished,
+                                 main_unifiedjob.elapsed,
+                                 main_unifiedjob.job_explanation,
+                                 main_unifiedjob.instance_group_id,
+                                 main_unifiedjob.installed_collections,
+                                 main_unifiedjob.ansible_version,
+                                 main_job.forks
+                                 FROM main_unifiedjob
+                                 LEFT JOIN django_content_type ON main_unifiedjob.polymorphic_ctype_id = django_content_type.id
+                                 LEFT JOIN main_job ON main_unifiedjob.id = main_job.unifiedjob_ptr_id
+                                 LEFT JOIN main_inventory ON main_job.inventory_id = main_inventory.id
+                                 LEFT JOIN main_organization ON main_organization.id = main_unifiedjob.organization_id
+                                 LEFT JOIN main_executionenvironment ON main_executionenvironment.id = main_unifiedjob.execution_environment_id
+                                 WHERE ((main_unifiedjob.created >= '{0}' AND main_unifiedjob.created < '{1}')
+                                       OR (main_unifiedjob.finished >= '{0}' AND main_unifiedjob.finished < '{1}'))
+                                       AND main_unifiedjob.launch_type != 'sync'
+                                 ORDER BY main_unifiedjob.id ASC) TO STDOUT WITH CSV HEADER
+                        """.format(since.isoformat(), until.isoformat())
+
+    return _copy_table(table='unified_jobs', query=unified_job_query, path=full_path)
+
+
+@register('job_host_summary_service', '1.4', format='csv', description=_('Data for billing'), fnc_slicing=daily_slicing)
+def job_host_summary_service_table(since, full_path, until, **kwargs):
+    if 'job_host_summary_service' not in get_optional_collectors():
+        return None
+
+    prepend_query = """
+        -- Define function for parsing field out of yaml encoded as text
+        CREATE OR REPLACE FUNCTION metrics_utility_parse_yaml_field(
+            str text,
+            field text
+        )
+        RETURNS text AS
+        $$
+        DECLARE
+            line_re text;
+            field_re text;
+        BEGIN
+            field_re := ' *[:=] *(.+?) *$';
+            line_re := '(?n)^' || field || field_re;
+            RETURN trim(both '"' from substring(str from line_re) );
+        END;
+        $$
+        LANGUAGE plpgsql;
+
+        -- Define function to check if field is a valid json
+        CREATE OR REPLACE FUNCTION metrics_utility_is_valid_json(p_json text)
+            returns boolean
+        AS
+        $$
+        BEGIN
+            RETURN (p_json::json is not null);
+        EXCEPTION
+            WHEN others THEN
+                RETURN false;
+        END;
+        $$
+        LANGUAGE plpgsql;
+    """
+
+    query = f"""
+    WITH
+    -- First: restrict to jobs that FINISHED in the window (uses index on main_unifiedjob.finished if present)
+    filtered_jobs AS (
+        SELECT mu.id
+        FROM main_unifiedjob mu
+        WHERE mu.finished >= '{since.isoformat()}'
+          AND mu.finished <  '{until.isoformat()}'
+          AND mu.finished IS NOT NULL
+    ),
+    --
+    -- Then: only host summaries that belong to those jobs (uses index on main_jobhostsummary.job_id)
+    filtered_hosts AS (
+        SELECT DISTINCT mjs.host_id
+        FROM main_jobhostsummary mjs
+        JOIN filtered_jobs fj ON fj.id = mjs.job_id
+    ),
+    --
+    hosts_variables AS (
+        SELECT
+            fh.host_id,
+            CASE
+                WHEN metrics_utility_is_valid_json(h.variables)
+                    THEN h.variables::jsonb->>'ansible_host'
+                ELSE metrics_utility_parse_yaml_field(h.variables, 'ansible_host')
+            END AS ansible_host_variable,
+            CASE
+                WHEN metrics_utility_is_valid_json(h.variables)
+                    THEN h.variables::jsonb->>'ansible_connection'
+                ELSE metrics_utility_parse_yaml_field(h.variables, 'ansible_connection')
+            END AS ansible_connection_variable
+        FROM filtered_hosts fh
+        LEFT JOIN main_host h ON h.id = fh.host_id
+    )
+
+    SELECT
+        mjs.id,
+        mjs.created,
+        mjs.modified,
+        mjs.host_name,
+        mjs.host_id AS host_remote_id,
+        hv.ansible_host_variable,
+        hv.ansible_connection_variable,
+        mjs.changed,
+        mjs.dark,
+        mjs.failures,
+        mjs.ok,
+        mjs.processed,
+        mjs.skipped,
+        mjs.failed,
+        mjs.ignored,
+        mjs.rescued,
+        mu.created AS job_created,
+        mjs.job_id AS job_remote_id,
+        mu.unified_job_template_id AS job_template_remote_id,
+        mu.name AS job_template_name,
+        mi.id AS inventory_remote_id,
+        mi.name AS inventory_name,
+        mo.id AS organization_remote_id,
+        mo.name AS organization_name,
+        mup.id AS project_remote_id,
+        mup.name AS project_name
+    FROM filtered_jobs fj
+    JOIN main_jobhostsummary mjs ON mjs.job_id = fj.id
+    LEFT JOIN main_job mj ON mjs.job_id = mj.unifiedjob_ptr_id
+    LEFT JOIN main_unifiedjob mu ON mu.id = mjs.job_id
+    LEFT JOIN main_unifiedjobtemplate AS mup ON mup.id = mj.project_id
+    LEFT JOIN main_inventory mi ON mi.id = mj.inventory_id
+    LEFT JOIN main_organization mo ON mo.id = mu.organization_id
+    LEFT JOIN hosts_variables hv ON hv.host_id = mjs.host_id
+    ORDER BY mu.finished ASC
+    """
+
+    return _copy_table(table='main_jobhostsummary', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path, prepend_query=prepend_query)
+
+
+@register('main_jobevent_service', '1.4', format='csv', description=_('Content usage'), fnc_slicing=daily_slicing)
+def main_jobevent_service_table(since, full_path, until, **kwargs):
+    if 'main_jobevent_service' not in get_optional_collectors():
+        return None
+
+    # Use the table alias 'e' here (you alias main_jobevent as e in the FROM)
+    event_data = r"replace(e.event_data, '\u', '\u005cu')::jsonb"
+
+    # 1) Load finished jobs in the window
+    jobs_query = """
+        SELECT uj.id AS job_id,
+               uj.created AS job_created
+        FROM main_unifiedjob uj
+        WHERE uj.finished >= %(since)s
+          AND uj.finished <  %(until)s
+    """
+    jobs = []
+
+    # do raw sql for django.db connection
+    with connection.cursor() as cursor:
+        cursor.execute(jobs_query, {'since': since, 'until': until})
+        jobs = cursor.fetchall()
+
+    # 2) Build a literal WHERE clause that preserves (job_id, job_created) pairing
+    if jobs:
+        # (e.job_id, e.job_created) IN (VALUES (id1, 'ts1'::timestamptz), ...)
+        pairs_sql = ',\n'.join(f"({jid}, '{jcreated.isoformat()}'::timestamptz)" for jid, jcreated in jobs)
+        where_clause = f'(e.job_id, e.job_created) IN (VALUES {pairs_sql})'
+    else:
+        # No jobs in the window → no events
+        where_clause = 'FALSE'
+
+    # 3) Final event query
+    query = f"""
+        SELECT
+            e.id,
+            e.created,
+            e.modified,
+            e.job_created,
+            uj.finished,
+            e.uuid,
+            e.parent_uuid,
+            e.event,
+
+            -- JSON extracted fields
+            ({event_data}->>'task_action')       AS task_action,
+            ({event_data}->>'resolved_action')   AS resolved_action,
+            ({event_data}->>'resolved_role')     AS resolved_role,
+            ({event_data}->>'duration')          AS duration,
+            ({event_data}->>'start')::timestamptz AS start,
+            ({event_data}->>'end')::timestamptz   AS end,
+
+            e.failed,
+            e.changed,
+            e.playbook,
+            e.play,
+            e.task,
+            e.role,
+            e.job_id  AS job_remote_id,
+            e.host_id AS host_remote_id,
+            e.host_name,
+
+            -- Warnings and deprecations (json arrays)
+            {event_data}->'res'->'warnings'     AS warnings,
+            {event_data}->'res'->'deprecations' AS deprecations,
+
+            CASE WHEN e.event = 'playbook_on_stats'
+                 THEN {event_data} - 'artifact_data'
+            END AS playbook_on_stats
+
+        FROM main_jobevent e
+        LEFT JOIN main_unifiedjob uj ON uj.id = e.job_id
+        WHERE {where_clause}
+    """
+
+    return _copy_table(table='main_jobevent', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path)
+
+
+@register('execution_environments', '1.4', format='csv', description=_('Execution environments'), fnc_slicing=limit_slicing)
+def execution_environments_table(since, full_path, until, **kwargs):
+    if 'execution_environments' not in get_optional_collectors():
+        return None
+
+    sql = """
+        SELECT
+        id,
+        created,
+        modified,
+        description,
+        image,
+        managed,
+        created_by_id,
+        credential_id,
+        modified_by_id,
+        organization_id,
+        name,
+        pull
+        FROM public.main_executionenvironment
+    """
+
+    return _copy_table(table='main_executionenvironment', query=f'COPY ({sql}) TO STDOUT WITH CSV HEADER', path=full_path)
