@@ -690,8 +690,10 @@ def unified_jobs_table(since, full_path, until, **kwargs):
                                  main_unifiedjob.instance_group_id,
                                  main_unifiedjob.installed_collections,
                                  main_unifiedjob.ansible_version,
-                                 main_job.forks
+                                 main_job.forks,
+                                 main_unifiedjobtemplate.name as job_template_name
                                  FROM main_unifiedjob
+                                 LEFT JOIN main_unifiedjobtemplate ON main_unifiedjobtemplate.id = main_unifiedjob.unified_job_template_id
                                  LEFT JOIN django_content_type ON main_unifiedjob.polymorphic_ctype_id = django_content_type.id
                                  LEFT JOIN main_job ON main_unifiedjob.id = main_job.unifiedjob_ptr_id
                                  LEFT JOIN main_inventory ON main_job.inventory_id = main_inventory.id
@@ -860,7 +862,7 @@ def main_jobevent_service_table(since, full_path, until, **kwargs):
             e.created,
             e.modified,
             e.job_created,
-            uj.finished,
+            uj.finished as job_finished,
             e.uuid,
             e.parent_uuid,
             e.event,
@@ -872,6 +874,7 @@ def main_jobevent_service_table(since, full_path, until, **kwargs):
             ({event_data}->>'duration')          AS duration,
             ({event_data}->>'start')::timestamptz AS start,
             ({event_data}->>'end')::timestamptz   AS end,
+            ({event_data}->>'task_uuid')        AS task_uuid,
 
             e.failed,
             e.changed,
@@ -889,7 +892,10 @@ def main_jobevent_service_table(since, full_path, until, **kwargs):
 
             CASE WHEN e.event = 'playbook_on_stats'
                  THEN {event_data} - 'artifact_data'
-            END AS playbook_on_stats
+            END AS playbook_on_stats,
+
+            uj.failed as job_failed,
+            uj.started as job_started
 
         FROM main_jobevent e
         LEFT JOIN main_unifiedjob uj ON uj.id = e.job_id

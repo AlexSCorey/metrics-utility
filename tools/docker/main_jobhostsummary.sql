@@ -1,5 +1,11 @@
 DO $$
 DECLARE
+  i_text text;
+  task_uuid_1 text;
+  task_uuid_2 text;
+  event_data_1 text;
+  event_data_2 text;
+  --
   default_organization_id                           INTEGER;
   default_inventory_id                              INTEGER;
   default_instance_id                               INTEGER;
@@ -361,6 +367,7 @@ $yaml$,
   FOR i IN 1..job_count LOOP
     INSERT INTO public.main_unifiedjob (
       created,
+      started,
       finished,
       modified,
       description,
@@ -389,6 +396,7 @@ $yaml$,
     )
     VALUES (
       TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- created
+      TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- started
       TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- finished
       TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',                                  -- modified
       ''::text,                               -- description
@@ -556,6 +564,15 @@ $yaml$,
       -- get host name
       SELECT name INTO host_name FROM public.main_host WHERE id = host_id;
 
+      -- task_uuid should be i + host_name + 1, second task should be i + host_name + 2
+      -- convert i to text
+      i_text := i::text;
+      task_uuid_1 := i_text || '_' || host_name || '_1';
+      task_uuid_2 := i_text || '_' || host_name || '_2';
+
+      event_data_1 := '{"task_action": "ansible.builtin.yum", "task_uuid": "' || task_uuid_1 || '"}';
+      event_data_2 := '{"task_action": "amazon.aws.s3_bucket", "task_uuid": "' || task_uuid_2 || '"}';
+
       -- event 1
       INSERT INTO public.main_jobevent (
         created,
@@ -583,7 +600,7 @@ $yaml$,
         TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
         TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
         'runner_on_start',
-        '{}'::text,
+        event_data_1,
         false,
         false,
         host_name,
@@ -630,7 +647,7 @@ $yaml$,
         TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
         TIMESTAMP WITH TIME ZONE '2025-06-13 10:00:00+00',
         'runner_on_ok',
-        '{}'::text,
+        event_data_2,
         false,
         false,
         host_name,
