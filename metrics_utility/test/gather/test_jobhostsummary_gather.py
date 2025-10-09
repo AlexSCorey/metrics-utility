@@ -74,7 +74,7 @@ env_vars = {
 uuid = '00000000-0000-0000-0000-000000000000'
 
 # where to find the tar.gz
-file_glob = f'./metrics_utility/test/test_data/data/2025/06/*/{uuid}-*.tar.gz'
+file_glob = f'./metrics_utility/test/test_data/data/*/*/*/{uuid}-*.tar.gz'
 file_paths = f'./metrics_utility/test/test_data/data/2025/06/13/{uuid}-*.tar.gz'
 
 # expected CSV content (header + rows)
@@ -316,12 +316,14 @@ def test_job_host_summary_invalid_values_still_enabled(cleanup_glob):
             os.remove(file)
 
 
+@pytest.mark.filterwarnings('ignore::ResourceWarning')
 def test_main_host_collection_trailing_comma(cleanup_glob):
     main_host_collection(cleanup_glob, collectors='main_jobevent,main_host', trailing_comma=True)
     main_host_collection(cleanup_glob, collectors='main_jobevent', trailing_comma=True)
     main_host_collection(cleanup_glob, collectors='main_host', trailing_comma=True)
 
 
+@pytest.mark.filterwarnings('ignore::ResourceWarning')
 def test_main_host_collection_no_trailing_comma(cleanup_glob):
     main_host_collection(cleanup_glob, collectors='main_jobevent,main_host', trailing_comma=False)
     main_host_collection(cleanup_glob, collectors='main_jobevent', trailing_comma=False)
