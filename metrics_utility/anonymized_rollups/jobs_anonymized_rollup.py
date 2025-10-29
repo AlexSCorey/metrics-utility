@@ -1,13 +1,18 @@
 import pandas as pd
 
+from metrics_utility.anonymized_rollups.base_anonymized_rollup import BaseAnonymizedRollup
 
-class JobsAnonymizedRollups:
+
+class JobsAnonymizedRollup(BaseAnonymizedRollup):
     """
     Collector - unified_jobs collector data
     """
 
-    @staticmethod
-    def base(dataframe):
+    def __init__(self):
+        super().__init__('jobs')
+        self.collector_names = ['unified_jobs']
+
+    def base(self, dataframe):
         """
         This function will create first level aggregation of the job dataframe, the result is json
 
@@ -30,18 +35,29 @@ class JobsAnonymizedRollups:
         dataframe corresponds to jobs
         """
 
+        # TODO - ensure all columns are present in the dataframe, then let analysis run with empty data
+        if dataframe.empty:
+            return {
+                'json': {},
+                'rollup': {'aggregated': dataframe},
+            }
+
         # Coerce datetime-like columns to pandas datetimes (timezone-aware if possible)
         # This allows inputs like '2025-09-29 13:16:53.637988+00'
-        for col in ['started', 'finished', 'job_created']:
+        for col in ['started', 'finished', 'created']:
             if col in dataframe.columns:
                 dataframe[col] = pd.to_datetime(dataframe[col], errors='coerce', utc=True)
+
+        # Convert failed column to boolean (handle PostgreSQL 't'/'f' representation)
+        if 'failed' in dataframe.columns:
+            dataframe['failed'] = dataframe['failed'].replace({'t': True, 'f': False}).fillna(False).astype(bool)
 
         # create view from dataframe where finished is not null and started is not null
         dataframe = dataframe[dataframe['finished'].notna() & dataframe['started'].notna()]
 
         # compute job duration in seconds, .dt.total_seconds()
         dataframe['job_duration_seconds'] = (dataframe['finished'] - dataframe['started']).dt.total_seconds()
-        dataframe['job_waiting_time_seconds'] = (dataframe['started'] - dataframe['job_created']).dt.total_seconds()
+        dataframe['job_waiting_time_seconds'] = (dataframe['started'] - dataframe['created']).dt.total_seconds()
 
         # guard against negative times
         dataframe = dataframe[dataframe['job_duration_seconds'] >= 0]
@@ -67,5 +83,16 @@ class JobsAnonymizedRollups:
             .assign(number_of_jobs_succeeded=lambda x: x['number_of_jobs_executed'] - x['number_of_jobs_failed'])
         )
 
-        # return as object that can be converted to json
-        return aggregations_by_template.to_dict(orient='records')
+        # Prepare rollup data (dataframe before conversion)
+        rollup_data = {
+            # pandas.DataFrame
+            'aggregations_by_template': aggregations_by_template,
+        }
+
+        # Prepare JSON data (converted to list of dicts)
+        json_data = aggregations_by_template.to_dict(orient='records')
+
+        return {
+            'json': json_data,
+            'rollup': rollup_data,
+        }

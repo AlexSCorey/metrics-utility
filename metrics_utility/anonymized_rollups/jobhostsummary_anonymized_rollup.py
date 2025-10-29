@@ -1,11 +1,16 @@
-class JobHostSummaryAnonymizedRollup:
+from metrics_utility.anonymized_rollups.base_anonymized_rollup import BaseAnonymizedRollup
+
+
+class JobHostSummaryAnonymizedRollup(BaseAnonymizedRollup):
     """
     Collector - job_host_summary_service collector data
     """
 
-    # TODO - will reuse the jobhostsummary rollup for CCSP
-    @staticmethod
-    def base(dataframe):
+    def __init__(self):
+        super().__init__('job_host_summary')
+        self.collector_names = ['job_host_summary_service']
+
+    def base(self, dataframe):
         """
         Avg tasks by template (column job_template_name)
         Number of tasks executed (sum of all tasks executed in dataframe)
@@ -16,12 +21,20 @@ class JobHostSummaryAnonymizedRollup:
 
         task_columns = ['dark', 'failures', 'ok', 'skipped', 'ignored', 'rescued']
 
+        # Return empty result if dataframe is empty
+        # TODO - ensure all columns are present in the dataframe, then let analysis run with empty data
+        if dataframe.empty:
+            return {
+                'json': [],
+                'rollup': {'aggregated': dataframe},
+            }
+
         dataframe['tasks_executed'] = dataframe[task_columns].sum(axis=1)
 
         aggregated = (
             dataframe.groupby('job_template_name')
             .agg(
-                jobs_total=('job_id', 'nunique'),
+                jobs_total=('job_remote_id', 'nunique'),
                 dark_total=('dark', 'sum'),
                 failures_total=('failures', 'sum'),
                 ok_total=('ok', 'sum'),
@@ -33,4 +46,16 @@ class JobHostSummaryAnonymizedRollup:
             .reset_index()
         )
 
-        return aggregated.to_dict(orient='records')
+        # Prepare rollup data (dataframe before conversion)
+        rollup_data = {
+            # pandas.DataFrame
+            'aggregated': aggregated,
+        }
+
+        # Prepare JSON data (converted to list of dicts)
+        json_data = aggregated.to_dict(orient='records')
+
+        return {
+            'json': json_data,
+            'rollup': rollup_data,
+        }

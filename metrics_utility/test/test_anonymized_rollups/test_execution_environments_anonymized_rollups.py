@@ -1,13 +1,24 @@
 import pandas as pd
 
-from metrics_utility.anonymized_rollups.execution_environments_anonymized_rollup import ExecutionEnvironmentsAnonymizedRollups
+from metrics_utility.anonymized_rollups.execution_environments_anonymized_rollup import ExecutionEnvironmentsAnonymizedRollup
+
+
+execution_environments = [
+    {'managed': 't'},
+    {'managed': 'f'},
+    {'managed': 't'},
+    {'managed': 'f'},
+    {'managed': 'f'},
+]
 
 
 def test_base_counts():
     # Sample dataframe with managed column
-    df = pd.DataFrame({'managed': [True, False, True, False, False]})
+    df = pd.DataFrame(execution_environments)
 
-    result = ExecutionEnvironmentsAnonymizedRollups.base(df)
+    execution_environments_anonymized_rollup = ExecutionEnvironmentsAnonymizedRollup()
+    result = execution_environments_anonymized_rollup.base(df)
+    result = result['json']
 
     # Expected values
     assert result['total_EE'] == 5

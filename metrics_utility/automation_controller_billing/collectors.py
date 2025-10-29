@@ -875,7 +875,7 @@ def main_jobevent_service_table(since, full_path, until, **kwargs):
             ({event_data}->>'start')::timestamptz AS start,
             ({event_data}->>'end')::timestamptz   AS end,
             ({event_data}->>'task_uuid')        AS task_uuid,
-
+            COALESCE( ({event_data}->>'ignore_errors')::boolean, false ) AS ignore_errors,
             e.failed,
             e.changed,
             e.playbook,
@@ -907,7 +907,7 @@ def main_jobevent_service_table(since, full_path, until, **kwargs):
     return _copy_table(table='main_jobevent', query=f'COPY ({query}) TO STDOUT WITH CSV HEADER', path=full_path)
 
 
-@register('execution_environments', '1.4', format='csv', description=_('Execution environments'), fnc_slicing=limit_slicing)
+@register('execution_environments', '1.4', format='csv', description=_('Execution environments'), fnc_slicing=daily_slicing)
 def execution_environments_table(since, full_path, until, **kwargs):
     if 'execution_environments' not in get_optional_collectors():
         return None
