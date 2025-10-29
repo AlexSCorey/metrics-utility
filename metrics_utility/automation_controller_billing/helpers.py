@@ -1,7 +1,7 @@
 import json
 
 from itertools import chain
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -29,84 +29,35 @@ def get_last_entries_from_db() -> Optional[str]:
             result = cursor.fetchone()
 
             if result and result[0]:
-                return result[0]  # This is the JSON value
-            else:
-                return None
+                return json.loads(result[0])  # This is the JSON value
     except Exception as e:
         logger.error(f'Error getting AUTOMATION_ANALYTICS_LAST_ENTRIES from database: {e}')
     return None
 
 
-def get_license_info_from_db() -> Dict[str, str]:
+def get_config_and_settings_from_db() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Get license information directly from the database."""
-    license_info = {}
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT key, value
                 FROM conf_setting
-                WHERE key IN (
-                    'PLATFORM', 'INSTALL_UUID', 'TOWER_BASE_URL', 'CONTROLLER_VERSION', 'LICENSE', 'SUBSCRIPTION_NAME', 'SKU',
-                    'SUPPORT_LEVEL', 'USAGE', 'PRODUCT_NAME', 'VALID_KEY',
-                    'SATELLITE', 'POOL_ID', 'SUBSCRIPTION_ID', 'ACCOUNT_NUMBER',
-                    'CURRENT_INSTANCES', 'AUTOMATED_INSTANCES', 'AUTOMATED_SINCE',
-                    'TRIAL', 'GRACE_PERIOD_REMAINING', 'COMPLIANT',
-                    'DATE_WARNING', 'DATE_EXPIRED', 'SUBSCRIPTION_USAGE_MODEL',
-                    'FREE_INSTANCES', 'INSTANCE_COUNT'
-                )
+                WHERE key IN ('LICENSE', 'INSTALL_UUID', 'TOWER_URL_BASE',
+                'SUBSCRIPTION_USAGE_MODEL','VERSION')
             """)
             rows = cursor.fetchall()
+            license_info = {}
+            settings_info = {}
             for row in rows:
                 key, value = row
-                license_info[key.lower()] = json.loads(value)
+                if key == 'LICENSE':
+                    license_info = json.loads(value)
+                else:
+                    settings_info[key.lower()] = json.loads(value)
+
     except Exception as e:
         logger.error(f'Error getting license information from database: {e}')
-    return license_info
-
-
-def get_controller_version_from_db() -> str:
-    """
-    Get AWX/Controller version from database.
-
-    Tries conf_setting table first, then falls back to main_instance table.
-
-    Returns:
-        str: Version string, 'No data found' if not found, or 'Database error' if query fails
-    """
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT value
-                FROM conf_setting
-                WHERE key IN ('AWX_VERSION', 'TOWER_VERSION', 'VERSION')
-                ORDER BY
-                    CASE key
-                        WHEN 'AWX_VERSION' THEN 1
-                        WHEN 'TOWER_VERSION' THEN 2
-                        WHEN 'VERSION' THEN 3
-                    END
-                LIMIT 1
-            """)
-            result = cursor.fetchone()
-            if result and result[0]:
-                return result[0]
-            cursor.execute("""
-                SELECT version
-                FROM main_instance
-                WHERE enabled = true
-                  AND version IS NOT NULL
-                  AND version != ''
-                ORDER BY modified DESC
-                LIMIT 1
-            """)
-            result = cursor.fetchone()
-            if result and result[0]:
-                return result[0]
-    except Exception as e:
-        logger.error(f'Error getting AWX/Controller version from database: {e}')
-        logger.error('Returning "Database error" as fallback for controller version')
-        return 'Database error'
-    return 'No data found'
+    return license_info, settings_info
 
 
 def datetime_hook(d):

@@ -16,9 +16,8 @@ from django.utils.translation import gettext_lazy as _
 
 from metrics_utility.automation_controller_billing.helpers import (
     datetime_hook,
-    get_controller_version_from_db,
+    get_config_and_settings_from_db,
     get_last_entries_from_db,
-    get_license_info_from_db,
 )
 from metrics_utility.base import CsvFileSplitter, register
 from metrics_utility.base.utils import get_max_gather_period_days, get_optional_collectors
@@ -103,7 +102,7 @@ def get_install_type():
 
 @register('config', '1.0', description=_('General platform configuration.'), config=True)
 def config(since, **kwargs):
-    license_info = get_license_info_from_db()
+    license_info, settings_info = get_config_and_settings_from_db()
     return {
         'platform': {
             'system': platform.system(),
@@ -111,9 +110,9 @@ def config(since, **kwargs):
             'release': platform.release(),
             'type': get_install_type(),
         },
-        'install_uuid': license_info.get('install_uuid'),
-        'tower_url_base': license_info.get('tower_url_base'),
-        'controller_version': get_controller_version_from_db(),
+        'install_uuid': settings_info.get('install_uuid'),
+        'tower_url_base': settings_info.get('tower_url_base'),
+        'controller_version': settings_info.get('version'),
         'license': license_info.get('license', 'UNLICENSED'),
         'subscription_name': license_info.get('subscription_name', ''),
         'sku': license_info.get('sku'),
@@ -133,7 +132,7 @@ def config(since, **kwargs):
         'compliant': license_info.get('compliant'),
         'date_warning': license_info.get('date_warning'),
         'date_expired': license_info.get('date_expired'),
-        'subscription_usage_model': license_info.get('subscription_usage_model', ''),  # 1.5+
+        'subscription_usage_model': settings_info.get('subscription_usage_model', ''),  # 1.5+
         'free_instances': license_info.get('free_instances', 0),
         'instance_count': license_info.get('instance_count', 0),
         'pendo_tracking': license_info.get('pendo_tracking', ''),
