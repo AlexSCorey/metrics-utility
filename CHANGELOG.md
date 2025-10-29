@@ -93,4 +93,7 @@
 
 ## 0.7.0dev
 
+- Removed direct AWX dependencies from collectors module
+- Replaced AWX license functions with direct database queries
+
 - TODO
