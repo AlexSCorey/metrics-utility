@@ -9,14 +9,16 @@ from typing import Tuple
 
 import distro
 
-from awx.conf.license import get_license
-from awx.main.utils import datetime_hook, get_awx_version
-from django.conf import settings
 from django.db import connection
 from django.db.utils import ProgrammingError
 from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
 
+from metrics_utility.automation_controller_billing.helpers import (
+    get_config_and_settings_from_db,
+    get_controller_version_from_db,
+    get_last_entries_from_db,
+)
 from metrics_utility.base import CsvFileSplitter, register
 from metrics_utility.base.utils import get_max_gather_period_days, get_optional_collectors
 from metrics_utility.exceptions import MetricsException, MissingRequiredEnvVar
@@ -48,11 +50,8 @@ def daily_slicing(key, last_gather, **kwargs):
     if since is not None:
         last_entry = since
     else:
-        from awx.conf.models import Setting
-
         horizon = until - timedelta(days=get_max_gather_period_days())
-        last_entries = Setting.objects.filter(key='AUTOMATION_ANALYTICS_LAST_ENTRIES').first()
-        last_entries = json.loads((last_entries.value if last_entries is not None else '') or '{}', object_hook=datetime_hook)
+        last_entries = get_last_entries_from_db()
         try:
             last_entry = max(last_entries.get(key) or last_gather, horizon)
         except TypeError:  # last_entries has a stale non-datetime entry for this collector
@@ -102,7 +101,7 @@ def get_install_type():
 
 @register('config', '1.0', description=_('General platform configuration.'), config=True)
 def config(since, **kwargs):
-    license_info = get_license()
+    license_info, settings_info = get_config_and_settings_from_db()
     return {
         'platform': {
             'system': platform.system(),
@@ -110,13 +109,13 @@ def config(since, **kwargs):
             'release': platform.release(),
             'type': get_install_type(),
         },
-        'install_uuid': settings.INSTALL_UUID,
-        'instance_uuid': settings.SYSTEM_UUID,
-        'controller_url_base': settings.TOWER_URL_BASE,
-        'controller_version': get_awx_version(),
+        'install_uuid': settings_info.get('install_uuid'),
+        'instance_uuid': settings_info.get('system_uuid', '00000000-0000-0000-0000-000000000000'),
+        'controller_url_base': settings_info.get('tower_url_base'),
+        'controller_version': get_controller_version_from_db(),
         'license_type': license_info.get('license_type', 'UNLICENSED'),
         'license_date': license_info.get('license_date'),
-        'subscription_name': license_info.get('subscription_name'),
+        'subscription_name': license_info.get('subscription_name', ''),
         'sku': license_info.get('sku'),
         'support_level': license_info.get('support_level'),
         'usage': license_info.get('usage'),
@@ -134,15 +133,15 @@ def config(since, **kwargs):
         'compliant': license_info.get('compliant'),
         'date_warning': license_info.get('date_warning'),
         'date_expired': license_info.get('date_expired'),
-        'subscription_usage_model': getattr(settings, 'SUBSCRIPTION_USAGE_MODEL', ''),  # 1.5+
+        'subscription_usage_model': settings_info.get('subscription_usage_model', ''),  # 1.5+
         'free_instances': license_info.get('free_instances', 0),
         'total_licensed_instances': license_info.get('instance_count', 0),
         'license_expiry': license_info.get('time_remaining', 0),
-        'pendo_tracking': settings.PENDO_TRACKING_STATE,
-        'authentication_backends': settings.AUTHENTICATION_BACKENDS,
-        'logging_aggregators': settings.LOG_AGGREGATOR_LOGGERS,
-        'external_logger_enabled': settings.LOG_AGGREGATOR_ENABLED,
-        'external_logger_type': getattr(settings, 'LOG_AGGREGATOR_TYPE', None),
+        'pendo_tracking': settings_info.get('pendo_tracking_state', ''),
+        'authentication_backends': settings_info.get('authentication_backends', ''),
+        'logging_aggregators': settings_info.get('log_aggregator_loggers', ''),
+        'external_logger_enabled': settings_info.get('log_aggregator_enabled', False),
+        'external_logger_type': settings_info.get('log_aggregator_type', None),
         'metrics_utility_version': version('metrics-utility'),  # version from setup.cfg
         'billing_provider_params': {},  # Is being overwritten in collector.gather by set ENV VARS
     }

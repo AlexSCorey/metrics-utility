@@ -1,8 +1,121 @@
 import json
 
 from itertools import chain
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
+
+from django.db import connection
+from django.utils.dateparse import parse_datetime
+
+from metrics_utility.logger import logger
+
+
+def get_last_entries_from_db() -> Optional[str]:
+    """
+    Get AUTOMATION_ANALYTICS_LAST_ENTRIES directly from database.
+
+    Returns:
+        Optional[str]: JSON string from database, or None if not found or error occurs
+    """
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT value
+                FROM conf_setting
+                WHERE key = 'AUTOMATION_ANALYTICS_LAST_ENTRIES'
+                LIMIT 1
+            """)
+            result = cursor.fetchone()
+
+            if result and result[0]:
+                return json.loads(result[0], object_hook=datetime_hook)  # This is the JSON value
+    except Exception as e:
+        logger.error(f'Error getting AUTOMATION_ANALYTICS_LAST_ENTRIES from database: {e}')
+    return {}
+
+
+def get_config_and_settings_from_db() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Get license information directly from the database."""
+    license_info = {}
+    settings_info = {}
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT key, value
+                FROM conf_setting
+                WHERE key IN ('LICENSE', 'INSTALL_UUID', 'TOWER_URL_BASE',
+                           'SUBSCRIPTION_USAGE_MODEL','VERSION', 'PENDO_TRACKING_STATE','AUTHENTICATION_BACKENDS',
+                           'LOG_AGGREGATOR_LOGGERS',  'SYSTEM_UUID', 'LOG_AGGREGATOR_ENABLED',
+                           'LOG_AGGREGATOR_TYPE')
+            """)
+            rows = cursor.fetchall()
+            for row in rows:
+                key, value = row
+                if key == 'LICENSE':
+                    license_info = json.loads(value)  # The LICENSE key has a value which is an object.
+                # We want all the items in the object put on their own
+                # dict.
+                else:
+                    settings_info[key.lower()] = json.loads(value)
+
+    except Exception as e:
+        logger.error(f'Error getting license information from database: {e}')
+    return license_info, settings_info
+
+
+def get_controller_version_from_db() -> str:
+    """
+    Get AWX/Controller version from database.
+    Tries conf_setting table first, then falls back to main_instance table.
+
+    Returns:
+        str: Version string, 'No data found' if not found, or 'Database error' if query fails
+    """
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT value
+                FROM conf_setting
+                WHERE key IN ('AWX_VERSION', 'TOWER_VERSION', 'VERSION')
+                ORDER BY
+                    CASE key
+                        WHEN 'AWX_VERSION' THEN 1
+                        WHEN 'TOWER_VERSION' THEN 2
+                        WHEN 'VERSION' THEN 3
+                    END
+                LIMIT 1
+            """)
+            result = cursor.fetchone()
+            if result and result[0]:
+                return result[0]
+            cursor.execute("""
+                SELECT version
+                FROM main_instance
+                WHERE enabled = true
+                  AND version IS NOT NULL
+                  AND version != ''
+                ORDER BY modified DESC
+                LIMIT 1
+            """)
+            result = cursor.fetchone()
+            if result and result[0]:
+                return result[0]
+    except Exception as e:
+        logger.error(f'Error getting AWX/Controller version from database: {e}')
+        logger.error('Returning "Database error" as fallback for controller version')
+        return 'Database error'
+    return 'No data found'
+
+
+def datetime_hook(d):
+    new_d = {}
+    for key, value in d.items():
+        try:
+            new_d[key] = parse_datetime(value)
+        except TypeError:
+            new_d[key] = value
+    return new_d
 
 
 def parse_json_array(x):

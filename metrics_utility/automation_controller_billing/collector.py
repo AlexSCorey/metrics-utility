@@ -2,13 +2,13 @@ import contextlib
 import json
 import os
 
-from awx.main.utils import datetime_hook
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
 
 import metrics_utility.base as base
 
+from metrics_utility.automation_controller_billing.helpers import get_last_entries_from_db
 from metrics_utility.automation_controller_billing.package.factory import Factory as PackageFactory
 from metrics_utility.logger import logger
 
@@ -120,11 +120,8 @@ class Collector(base.Collector):
         # We are reusing Settings used by Analytics, so we don't have to backport changes into analytics
         # We can safely do this, by making sure we use the same lock as Analytics, before we persist
         # these settings.
-        from awx.conf.models import Setting
-
-        last_entries = Setting.objects.filter(key='AUTOMATION_ANALYTICS_LAST_ENTRIES').first()
-        last_gathered_entries = json.loads((last_entries.value if last_entries is not None else '') or '{}', object_hook=datetime_hook)
-        return last_gathered_entries
+        last_entries = get_last_entries_from_db()
+        return last_entries
 
     def _gather_finalize(self):
         """Persisting timestamps (manual/schedule mode only)"""
