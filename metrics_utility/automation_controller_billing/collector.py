@@ -8,7 +8,7 @@ from django.db import connection
 
 import metrics_utility.base as base
 
-from metrics_utility.automation_controller_billing.helpers import datetime_hook, get_last_entries_from_db
+from metrics_utility.automation_controller_billing.helpers import get_last_entries_from_db
 from metrics_utility.automation_controller_billing.package.factory import Factory as PackageFactory
 from metrics_utility.logger import logger
 
@@ -121,8 +121,7 @@ class Collector(base.Collector):
         # We can safely do this, by making sure we use the same lock as Analytics, before we persist
         # these settings.
         last_entries = get_last_entries_from_db()
-        last_gathered_entries = json.loads(last_entries or '{}', object_hook=datetime_hook)
-        return last_gathered_entries
+        return last_entries
 
     def _gather_finalize(self):
         """Persisting timestamps (manual/schedule mode only)"""

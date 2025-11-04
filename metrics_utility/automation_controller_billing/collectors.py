@@ -15,8 +15,8 @@ from django.utils.timezone import now, timedelta
 from django.utils.translation import gettext_lazy as _
 
 from metrics_utility.automation_controller_billing.helpers import (
-    datetime_hook,
     get_config_and_settings_from_db,
+    get_controller_version_from_db,
     get_last_entries_from_db,
 )
 from metrics_utility.base import CsvFileSplitter, register
@@ -52,7 +52,6 @@ def daily_slicing(key, last_gather, **kwargs):
     else:
         horizon = until - timedelta(days=get_max_gather_period_days())
         last_entries = get_last_entries_from_db()
-        last_entries = json.loads(last_entries or '{}', object_hook=datetime_hook)
         try:
             last_entry = max(last_entries.get(key) or last_gather, horizon)
         except TypeError:  # last_entries has a stale non-datetime entry for this collector
@@ -111,9 +110,11 @@ def config(since, **kwargs):
             'type': get_install_type(),
         },
         'install_uuid': settings_info.get('install_uuid'),
-        'tower_url_base': settings_info.get('tower_url_base'),
-        'controller_version': settings_info.get('version'),
-        'license': license_info.get('license', 'UNLICENSED'),
+        'instance_uuid': settings_info.get('system_uuid', '00000000-0000-0000-0000-000000000000'),
+        'controller_url_base': settings_info.get('tower_url_base'),
+        'controller_version': get_controller_version_from_db(),
+        'license_type': license_info.get('license_type', 'UNLICENSED'),
+        'license_date': license_info.get('license_date'),
         'subscription_name': license_info.get('subscription_name', ''),
         'sku': license_info.get('sku'),
         'support_level': license_info.get('support_level'),
@@ -134,12 +135,13 @@ def config(since, **kwargs):
         'date_expired': license_info.get('date_expired'),
         'subscription_usage_model': settings_info.get('subscription_usage_model', ''),  # 1.5+
         'free_instances': license_info.get('free_instances', 0),
-        'instance_count': license_info.get('instance_count', 0),
-        'pendo_tracking': license_info.get('pendo_tracking', ''),
-        'authentication_backends': license_info.get('authentication_backends', ''),
-        'logging_aggregators': license_info.get('logging_aggregators', ''),
-        'external_logger_enabled': license_info.get('external_logger_enabled', False),
-        'external_logger_type': license_info.get('external_logger_type', None),
+        'total_licensed_instances': license_info.get('instance_count', 0),
+        'license_expiry': license_info.get('time_remaining', 0),
+        'pendo_tracking': settings_info.get('pendo_tracking_state', ''),
+        'authentication_backends': settings_info.get('authentication_backends', ''),
+        'logging_aggregators': settings_info.get('log_aggregator_loggers', ''),
+        'external_logger_enabled': settings_info.get('log_aggregator_enabled', False),
+        'external_logger_type': settings_info.get('log_aggregator_type', None),
         'metrics_utility_version': version('metrics-utility'),  # version from setup.cfg
         'billing_provider_params': {},  # Is being overwritten in collector.gather by set ENV VARS
     }

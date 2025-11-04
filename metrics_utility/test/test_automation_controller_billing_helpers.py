@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from django.db import DatabaseError
@@ -75,11 +76,15 @@ class TestGetLastEntriesFromDb:
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
         test_json = '{"config": "2024-01-01T00:00:00Z", "hosts": "2024-01-03T00:00:00Z", "jobs": "2024-01-02T00:00:00Z"}'
         mock_cursor.fetchone.return_value = (test_json,)
-        expected_result = {'config': '2024-01-01T00:00:00Z', 'hosts': '2024-01-03T00:00:00Z', 'jobs': '2024-01-02T00:00:00Z'}
         # Execute
         result = get_last_entries_from_db()
 
-        # Assert
+        # Assert - datetime_hook parses datetime strings to datetime objects
+        expected_result = {
+            'config': datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
+            'hosts': datetime(2024, 1, 3, 0, 0, tzinfo=timezone.utc),
+            'jobs': datetime(2024, 1, 2, 0, 0, tzinfo=timezone.utc),
+        }
         assert result == expected_result
         mock_cursor.execute.assert_called_once()
         # Verify correct SQL query
@@ -98,7 +103,7 @@ class TestGetLastEntriesFromDb:
         result = get_last_entries_from_db()
 
         # Assert
-        assert result is None
+        assert result == {}
 
     @patch('metrics_utility.automation_controller_billing.helpers.logger')
     @patch('metrics_utility.automation_controller_billing.helpers.connection')
@@ -111,7 +116,7 @@ class TestGetLastEntriesFromDb:
         result = get_last_entries_from_db()
 
         # Assert
-        assert result is None
+        assert result == {}
         mock_logger.error.assert_called_once()
         assert 'Error getting AUTOMATION_ANALYTICS_LAST_ENTRIES from database' in str(mock_logger.error.call_args)
 
@@ -179,4 +184,9 @@ class TestIntegration:
             'license_type': 'enterprise',
         }
         assert version == '4.7.5'  # Updated to expect product version
-        assert entries == {'config': '2024-01-01T00:00:00Z', 'jobs': '2024-01-02T00:00:00Z'}
+        # datetime_hook parses datetime strings to datetime objects
+        expected_entries = {
+            'config': datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
+            'jobs': datetime(2024, 1, 2, 0, 0, tzinfo=timezone.utc),
+        }
+        assert entries == expected_entries
