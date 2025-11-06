@@ -1,5 +1,4 @@
 import contextlib
-import hashlib
 import inspect
 import logging
 import os
@@ -9,8 +8,10 @@ import tempfile
 
 from abc import abstractmethod
 
+from django.db import DEFAULT_DB_ALIAS
 from django.utils.timezone import now, timedelta
 
+from metrics_utility.base.db_lock_helpers import advisory_lock
 from metrics_utility.logger import logger
 
 from .collection import Collection
@@ -309,28 +310,22 @@ class Collector:
             self._process_package(package)
 
     @contextlib.contextmanager
-    def _pg_advisory_lock(self, key, wait=False):
-        """Postgres db lock"""
-        connection = self.db_connection()
+    def _pg_advisory_lock(self, key, shared=False, wait=False, db_alias=DEFAULT_DB_ALIAS):
+        """Postgres db lock
 
-        if connection is None:
-            yield True
-        else:
-            # Build 64-bit integer out of the resource id
-            resource_key = int(hashlib.sha512(key.encode()).hexdigest(), 16) % 2**63
+        Yields:
+            bool: True if lock was acquired, False if not acquired (only when wait=True).
+                  When wait=False, should either yield True or raise an exception.
 
-            cursor = connection.cursor()
-
-            try:
-                if wait:
-                    cursor.execute('SELECT pg_advisory_lock(%s);', (resource_key,))
-                else:
-                    cursor.execute('SELECT pg_try_advisory_lock(%s);', (resource_key,))
-                acquired = cursor.fetchall()[0][0]
-                yield acquired
-            finally:
-                cursor.execute('SELECT pg_advisory_unlock(%s);', (resource_key,))
-                cursor.close()
+        The implementation should:
+        - Support PostgreSQL advisory locks using pg_advisory_lock/pg_try_advisory_lock
+        - Handle lock release automatically in finally block using pg_advisory_unlock
+        - Support both shared and exclusive locks if needed
+        - Convert string keys to appropriate integer format for PostgreSQL
+        - Raise exceptions when wait=False and lock cannot be acquired
+        """
+        with advisory_lock(key, shared=shared, wait=wait, db_alias=db_alias) as lock:
+            yield lock
 
     def _process_packages(self):
         for group, packages in self.packages.items():

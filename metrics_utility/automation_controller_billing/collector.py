@@ -10,16 +10,8 @@ import metrics_utility.base as base
 
 from metrics_utility.automation_controller_billing.helpers import get_last_entries_from_db
 from metrics_utility.automation_controller_billing.package.factory import Factory as PackageFactory
+from metrics_utility.base.db_lock_helpers import advisory_lock
 from metrics_utility.logger import logger
-
-
-# work around https://github.com/ansible/awx/pull/15676
-try:
-    # 2.4, early 2.5
-    from awx.main.utils.pglock import advisory_lock
-except ImportError:
-    # later 2.5, 2.6
-    from ansible_base.lib.utils.db import advisory_lock
 
 
 class Collector(base.Collector):
@@ -97,9 +89,13 @@ class Collector(base.Collector):
         return base.Collector.registered_collectors(collectors)
 
     @contextlib.contextmanager
-    def _pg_advisory_lock(self, key, wait=False):
+    def _pg_advisory_lock(
+        self,
+        *args,
+        **kwargs,
+    ):
         """Use awx specific implementation to pass tests with sqlite3"""
-        with advisory_lock(key, wait=wait) as lock:
+        with advisory_lock(*args, **kwargs) as lock:
             yield lock
 
     def _load_last_gathered_entries(self):
