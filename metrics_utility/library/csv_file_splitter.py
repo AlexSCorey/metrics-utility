@@ -1,8 +1,6 @@
 import io
 import os
 
-from .package import Package
-
 
 class CsvFileSplitter(io.StringIO):
     """Helper for writing big data into multiple files splitted by size.
@@ -11,7 +9,7 @@ class CsvFileSplitter(io.StringIO):
     :param max_file_size: determined by decorated function's attribute "max_data_size"
     """
 
-    def __init__(self, filespec=None, max_file_size=Package.MAX_DATA_SIZE, *args, **kwargs):
+    def __init__(self, filespec=None, max_file_size=200 * 1048576, *args, **kwargs):
         self.max_file_size = max_file_size
         self.filespec = filespec
         self.files = []
