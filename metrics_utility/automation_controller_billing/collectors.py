@@ -28,6 +28,14 @@ from metrics_utility.logger import logger, logger_info_level
 from .prometheus_client import PrometheusClient
 
 
+try:
+    from psycopg.errors import UndefinedTable
+except ImportError:
+
+    class UndefinedTable(Exception):
+        pass
+
+
 """
 This module is used to define metrics collected by
 gather_automation_controller_billing_data command. Each function is
@@ -436,7 +444,7 @@ def main_indirectmanagednodeaudit_table(since, full_path, until, **kwargs):
             query=f'COPY ({query}) TO STDOUT WITH CSV HEADER',
             path=full_path,
         )
-    except ProgrammingError as e:
+    except (ProgrammingError, UndefinedTable) as e:
         logger.warning(
             'main_indirectmanagednodeaudit table missing in the database schema: %s.'
             ' Falling back to behavior without indirect managed node audit data.',
