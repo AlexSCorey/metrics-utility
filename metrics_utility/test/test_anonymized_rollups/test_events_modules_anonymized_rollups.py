@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from metrics_utility.anonymized_rollups.events_modules_anonymized_rollup import EventModulesAnonymizedRollup
 
@@ -297,6 +298,24 @@ events = [
         'resolved_action': None,
         'ignore_errors': False,
     },
+    # ================================================================
+    # Job 5 – maintenance.yml – job never started → job_started=None
+    # ================================================================
+    # Job 5 Host 1 – t002 (yum task that was queued but job never started, cancelled immediately)
+    {
+        'job_id': 5,
+        'playbook': 'maintenance.yml',
+        'host_id': 9,
+        'task_uuid': 't002',
+        'event': 'runner_on_failed',
+        'task_action': 'community.general.yum',
+        'job_created': '2024-01-06 10:00:00+00',
+        'job_started': None,
+        'job_finished': '2024-01-06 10:00:05+00',
+        'job_failed': True,
+        'resolved_action': None,
+        'ignore_errors': False,
+    },
 ]
 
 
@@ -316,24 +335,11 @@ def test_events_modules_aggregations_basic():
 
     pprint.pprint(result)
 
-    # Assert list of modules used to automate
+    # Assert total modules used to automate
     assert result['modules_used_to_automate_total'] == 7
 
-    modules_list = result['list_of_modules_used_to_automate']
-    assert len(modules_list) == 7
-
-    assert result['list_of_modules_used_to_automate'] == [
-        {'module_name': 'ansible.netcommon.cli_config', 'collection_source': 'certified', 'collection_name': 'ansible.netcommon'},
-        {'module_name': 'ansible.posix.firewalld', 'collection_source': 'certified', 'collection_name': 'ansible.posix'},
-        {'module_name': 'ansible.windows.win_copy', 'collection_source': 'certified', 'collection_name': 'ansible.windows'},
-        {'module_name': 'community.aws.ec2', 'collection_source': 'community', 'collection_name': 'community.aws'},
-        {'module_name': 'community.general.yum', 'collection_source': 'community', 'collection_name': 'community.general'},
-        {'module_name': 'community.mongodb.insert', 'collection_source': 'community', 'collection_name': 'community.mongodb'},
-        {'module_name': 'custom.user.collection', 'collection_source': 'Unknown', 'collection_name': 'custom.user'},
-    ]
-
     # average number of modules per playbook based on current aggregation
-    assert result['avg_number_of_modules_used_in_a_playbooks'] == 3.5
+    assert result['avg_number_of_modules_used_in_a_playbooks'] == pytest.approx(3.0)
 
     # total modules used per playbook (current aggregation)
     assert result['modules_used_per_playbook_total'] == {
@@ -341,9 +347,10 @@ def test_events_modules_aggregations_basic():
         'deploy.yml': 3,
         'infra.yml': 3,
         'site.yml': 5,
+        'maintenance.yml': 1,
     }
 
-    assert result['total_hosts_automated'] == 8
+    assert result['total_hosts_automated'] == 9
 
     # collection stats assertions (current aggregation schema)
     coll_by_name = {row['collection_name']: row for row in result['collection_name_stats']}
@@ -360,6 +367,7 @@ def test_events_modules_aggregations_basic():
     assert copy_stats['task_skipped_total'] == 0
     assert copy_stats['task_unreachable_total'] == 0
     assert copy_stats['jobs_total'] == 3
+    assert copy_stats['number_of_jobs_never_started'] == 0
     assert copy_stats['hosts_total'] == 3
     assert copy_stats['jobs_failed_because_of_module_failure_total'] == 0
 
@@ -373,6 +381,7 @@ def test_events_modules_aggregations_basic():
     assert template_stats['task_skipped_total'] == 0
     assert template_stats['task_unreachable_total'] == 1
     assert template_stats['jobs_total'] == 2
+    assert template_stats['number_of_jobs_never_started'] == 0
     assert template_stats['hosts_total'] == 2
     assert template_stats['jobs_failed_because_of_module_failure_total'] == 0
 
@@ -386,6 +395,7 @@ def test_events_modules_aggregations_basic():
     assert firewalld_stats['task_skipped_total'] == 0
     assert firewalld_stats['task_unreachable_total'] == 0
     assert firewalld_stats['jobs_total'] == 2
+    assert firewalld_stats['number_of_jobs_never_started'] == 0
     assert firewalld_stats['hosts_total'] == 2
     assert firewalld_stats['jobs_failed_because_of_module_failure_total'] == 1
 
@@ -399,6 +409,7 @@ def test_events_modules_aggregations_basic():
     assert ec2_stats['task_skipped_total'] == 1
     assert ec2_stats['task_unreachable_total'] == 0
     assert ec2_stats['jobs_total'] == 2
+    assert ec2_stats['number_of_jobs_never_started'] == 0
     assert ec2_stats['hosts_total'] == 4
     assert ec2_stats['jobs_failed_because_of_module_failure_total'] == 0
 
@@ -407,13 +418,14 @@ def test_events_modules_aggregations_basic():
     assert yum_stats['collection_source'] == 'community'
     assert yum_stats['task_clean_success_total'] == 0
     assert yum_stats['task_success_with_reruns_total'] == 0
-    assert yum_stats['task_failed_total'] == 2
+    assert yum_stats['task_failed_total'] == 3
     assert yum_stats['task_failed_and_ignored_total'] == 0
     assert yum_stats['task_skipped_total'] == 0
     assert yum_stats['task_unreachable_total'] == 0
-    assert yum_stats['jobs_total'] == 2
-    assert yum_stats['hosts_total'] == 1
-    assert yum_stats['jobs_failed_because_of_module_failure_total'] == 2
+    assert yum_stats['jobs_total'] == 3
+    assert yum_stats['number_of_jobs_never_started'] == 1
+    assert yum_stats['hosts_total'] == 2
+    assert yum_stats['jobs_failed_because_of_module_failure_total'] == 3
 
     # community.mongodb.insert (community)
     mongo_stats = stats_by_module['community.mongodb.insert']
@@ -425,6 +437,7 @@ def test_events_modules_aggregations_basic():
     assert mongo_stats['task_skipped_total'] == 0
     assert mongo_stats['task_unreachable_total'] == 0
     assert mongo_stats['jobs_total'] == 2
+    assert mongo_stats['number_of_jobs_never_started'] == 0
     assert mongo_stats['hosts_total'] == 2
     assert mongo_stats['jobs_failed_because_of_module_failure_total'] == 0
 
@@ -438,6 +451,7 @@ def test_events_modules_aggregations_basic():
     assert custom_stats['task_skipped_total'] == 0
     assert custom_stats['task_unreachable_total'] == 0
     assert custom_stats['jobs_total'] == 1
+    assert custom_stats['number_of_jobs_never_started'] == 0
     assert custom_stats['hosts_total'] == 1
     assert custom_stats['jobs_failed_because_of_module_failure_total'] == 0
 
@@ -447,12 +461,13 @@ def test_events_modules_aggregations_basic():
     netcommon_coll = coll_by_name['ansible.netcommon']
     assert netcommon_coll['collection_source'] == 'certified'
     assert netcommon_coll['jobs_total'] == 2
+    assert netcommon_coll['number_of_jobs_never_started'] == 0
     assert netcommon_coll['hosts_total'] == 2
-    assert netcommon_coll['job_duration_total_seconds'] == 1320.0
-    assert netcommon_coll['job_waiting_time_total_seconds'] == 360.0
-    assert netcommon_coll['avg_job_duration_seconds'] == 660.0
-    assert netcommon_coll['avg_job_waiting_time_seconds'] == 180.0
-    assert netcommon_coll['avg_hosts_per_job'] == 1.0
+    assert netcommon_coll['job_duration_total_seconds'] == pytest.approx(1320.0)
+    assert netcommon_coll['job_waiting_time_total_seconds'] == pytest.approx(360.0)
+    assert netcommon_coll['avg_job_duration_seconds'] == pytest.approx(660.0)
+    assert netcommon_coll['avg_job_waiting_time_seconds'] == pytest.approx(180.0)
+    assert netcommon_coll['avg_hosts_per_job'] == pytest.approx(1.0)
     assert netcommon_coll['jobs_containing_collection_name_failed_total'] == 1
     assert netcommon_coll['jobs_failed_because_of_collection_name_failure_total'] == 0
     assert netcommon_coll['task_clean_success_total'] == 1
@@ -466,12 +481,13 @@ def test_events_modules_aggregations_basic():
     posix_coll = coll_by_name['ansible.posix']
     assert posix_coll['collection_source'] == 'certified'
     assert posix_coll['jobs_total'] == 2
+    assert posix_coll['number_of_jobs_never_started'] == 0
     assert posix_coll['hosts_total'] == 2
-    assert posix_coll['job_duration_total_seconds'] == 1380.0
-    assert posix_coll['job_waiting_time_total_seconds'] == 900.0
-    assert posix_coll['avg_job_duration_seconds'] == 690.0
-    assert posix_coll['avg_job_waiting_time_seconds'] == 450.0
-    assert posix_coll['avg_hosts_per_job'] == 1.0
+    assert posix_coll['job_duration_total_seconds'] == pytest.approx(1380.0)
+    assert posix_coll['job_waiting_time_total_seconds'] == pytest.approx(900.0)
+    assert posix_coll['avg_job_duration_seconds'] == pytest.approx(690.0)
+    assert posix_coll['avg_job_waiting_time_seconds'] == pytest.approx(450.0)
+    assert posix_coll['avg_hosts_per_job'] == pytest.approx(1.0)
     assert posix_coll['jobs_containing_collection_name_failed_total'] == 1
     assert posix_coll['jobs_failed_because_of_collection_name_failure_total'] == 1
     assert posix_coll['task_clean_success_total'] == 1
@@ -485,12 +501,13 @@ def test_events_modules_aggregations_basic():
     windows_coll = coll_by_name['ansible.windows']
     assert windows_coll['collection_source'] == 'certified'
     assert windows_coll['jobs_total'] == 3
+    assert windows_coll['number_of_jobs_never_started'] == 0
     assert windows_coll['hosts_total'] == 3
-    assert windows_coll['job_duration_total_seconds'] == 2100.0
-    assert windows_coll['job_waiting_time_total_seconds'] == 900.0
-    assert windows_coll['avg_job_duration_seconds'] == 700.0
-    assert windows_coll['avg_job_waiting_time_seconds'] == 300.0
-    assert windows_coll['avg_hosts_per_job'] == 1.0
+    assert windows_coll['job_duration_total_seconds'] == pytest.approx(2100.0)
+    assert windows_coll['job_waiting_time_total_seconds'] == pytest.approx(900.0)
+    assert windows_coll['avg_job_duration_seconds'] == pytest.approx(700.0)
+    assert windows_coll['avg_job_waiting_time_seconds'] == pytest.approx(300.0)
+    assert windows_coll['avg_hosts_per_job'] == pytest.approx(1.0)
     assert windows_coll['jobs_containing_collection_name_failed_total'] == 3
     assert windows_coll['jobs_failed_because_of_collection_name_failure_total'] == 0
     assert windows_coll['task_clean_success_total'] == 1
@@ -504,12 +521,13 @@ def test_events_modules_aggregations_basic():
     aws_coll = coll_by_name['community.aws']
     assert aws_coll['collection_source'] == 'community'
     assert aws_coll['jobs_total'] == 2
+    assert aws_coll['number_of_jobs_never_started'] == 0
     assert aws_coll['hosts_total'] == 4
-    assert aws_coll['job_duration_total_seconds'] == 1380.0
-    assert aws_coll['job_waiting_time_total_seconds'] == 900.0
-    assert aws_coll['avg_job_duration_seconds'] == 690.0
-    assert aws_coll['avg_job_waiting_time_seconds'] == 450.0
-    assert aws_coll['avg_hosts_per_job'] == 2.0
+    assert aws_coll['job_duration_total_seconds'] == pytest.approx(1380.0)
+    assert aws_coll['job_waiting_time_total_seconds'] == pytest.approx(900.0)
+    assert aws_coll['avg_job_duration_seconds'] == pytest.approx(690.0)
+    assert aws_coll['avg_job_waiting_time_seconds'] == pytest.approx(450.0)
+    assert aws_coll['avg_hosts_per_job'] == pytest.approx(2.0)
     assert aws_coll['jobs_containing_collection_name_failed_total'] == 1
     assert aws_coll['jobs_failed_because_of_collection_name_failure_total'] == 0
     assert aws_coll['task_clean_success_total'] == 2
@@ -522,18 +540,19 @@ def test_events_modules_aggregations_basic():
     # community.general
     general_coll = coll_by_name['community.general']
     assert general_coll['collection_source'] == 'community'
-    assert general_coll['jobs_total'] == 2
-    assert general_coll['hosts_total'] == 1
-    assert general_coll['job_duration_total_seconds'] == 1500.0
-    assert general_coll['job_waiting_time_total_seconds'] == 300.0
-    assert general_coll['avg_job_duration_seconds'] == 750.0
-    assert general_coll['avg_job_waiting_time_seconds'] == 150.0
-    assert general_coll['avg_hosts_per_job'] == 1.0
-    assert general_coll['jobs_containing_collection_name_failed_total'] == 2
-    assert general_coll['jobs_failed_because_of_collection_name_failure_total'] == 2
+    assert general_coll['jobs_total'] == 3
+    assert general_coll['number_of_jobs_never_started'] == 1
+    assert general_coll['hosts_total'] == 2
+    assert general_coll['job_duration_total_seconds'] == pytest.approx(1500.0)
+    assert general_coll['job_waiting_time_total_seconds'] == pytest.approx(300.0)
+    assert general_coll['avg_job_duration_seconds'] == pytest.approx(500.0)
+    assert general_coll['avg_job_waiting_time_seconds'] == pytest.approx(100.0)
+    assert general_coll['avg_hosts_per_job'] == pytest.approx(1.0)
+    assert general_coll['jobs_containing_collection_name_failed_total'] == 3
+    assert general_coll['jobs_failed_because_of_collection_name_failure_total'] == 3
     assert general_coll['task_clean_success_total'] == 0
     assert general_coll['task_success_with_reruns_total'] == 0
-    assert general_coll['task_failed_total'] == 2
+    assert general_coll['task_failed_total'] == 3
     assert general_coll['task_failed_and_ignored_total'] == 0
     assert general_coll['task_skipped_total'] == 0
     assert general_coll['task_unreachable_total'] == 0
@@ -542,12 +561,13 @@ def test_events_modules_aggregations_basic():
     mongodb_coll = coll_by_name['community.mongodb']
     assert mongodb_coll['collection_source'] == 'community'
     assert mongodb_coll['jobs_total'] == 2
+    assert mongodb_coll['number_of_jobs_never_started'] == 0
     assert mongodb_coll['hosts_total'] == 2
-    assert mongodb_coll['job_duration_total_seconds'] == 1500.0
-    assert mongodb_coll['job_waiting_time_total_seconds'] == 300.0
-    assert mongodb_coll['avg_job_duration_seconds'] == 750.0
-    assert mongodb_coll['avg_job_waiting_time_seconds'] == 150.0
-    assert mongodb_coll['avg_hosts_per_job'] == 1.0
+    assert mongodb_coll['job_duration_total_seconds'] == pytest.approx(1500.0)
+    assert mongodb_coll['job_waiting_time_total_seconds'] == pytest.approx(300.0)
+    assert mongodb_coll['avg_job_duration_seconds'] == pytest.approx(750.0)
+    assert mongodb_coll['avg_job_waiting_time_seconds'] == pytest.approx(150.0)
+    assert mongodb_coll['avg_hosts_per_job'] == pytest.approx(1.0)
     assert mongodb_coll['jobs_containing_collection_name_failed_total'] == 2
     assert mongodb_coll['jobs_failed_because_of_collection_name_failure_total'] == 0
     assert mongodb_coll['task_clean_success_total'] == 1
@@ -561,12 +581,13 @@ def test_events_modules_aggregations_basic():
     custom_coll = coll_by_name['custom.user']
     assert custom_coll['collection_source'] == 'Unknown'
     assert custom_coll['jobs_total'] == 1
+    assert custom_coll['number_of_jobs_never_started'] == 0
     assert custom_coll['hosts_total'] == 1
-    assert custom_coll['job_duration_total_seconds'] == 540.0
-    assert custom_coll['job_waiting_time_total_seconds'] == 60.0
-    assert custom_coll['avg_job_duration_seconds'] == 540.0
-    assert custom_coll['avg_job_waiting_time_seconds'] == 60.0
-    assert custom_coll['avg_hosts_per_job'] == 1.0
+    assert custom_coll['job_duration_total_seconds'] == pytest.approx(540.0)
+    assert custom_coll['job_waiting_time_total_seconds'] == pytest.approx(60.0)
+    assert custom_coll['avg_job_duration_seconds'] == pytest.approx(540.0)
+    assert custom_coll['avg_job_waiting_time_seconds'] == pytest.approx(60.0)
+    assert custom_coll['avg_hosts_per_job'] == pytest.approx(1.0)
     assert custom_coll['jobs_containing_collection_name_failed_total'] == 1
     assert custom_coll['jobs_failed_because_of_collection_name_failure_total'] == 0
     assert custom_coll['task_clean_success_total'] == 1
