@@ -1,4 +1,3 @@
-import contextlib
 import inspect
 import logging
 import os
@@ -8,10 +7,10 @@ import tempfile
 
 from abc import abstractmethod
 
-from django.db import DEFAULT_DB_ALIAS
+from django.db import connection
 from django.utils.timezone import now, timedelta
 
-from metrics_utility.base.db_lock_helpers import advisory_lock
+from metrics_utility.library.lock import lock
 from metrics_utility.logger import logger
 
 from .collection import Collection
@@ -108,7 +107,7 @@ class Collector:
         :param until: (datetime) - high threshold of data changes (defaults to now)
         :return: None or list of paths to tarballs (.tar.gz)
         """
-        with self._pg_advisory_lock('gather_analytics_lock', wait=False) as acquired:
+        with lock('gather_analytics_lock', wait=False, db=connection) as acquired:
             if not acquired:
                 logger.log(self.log_level, 'Not gathering analytics, another task holds lock')
                 return None
@@ -308,24 +307,6 @@ class Collector:
         package.add_collection(collection)
         if collection.ship_immediately():
             self._process_package(package)
-
-    @contextlib.contextmanager
-    def _pg_advisory_lock(self, key, shared=False, wait=False, db_alias=DEFAULT_DB_ALIAS):
-        """Postgres db lock
-
-        Yields:
-            bool: True if lock was acquired, False if not acquired (only when wait=True).
-                  When wait=False, should either yield True or raise an exception.
-
-        The implementation should:
-        - Support PostgreSQL advisory locks using pg_advisory_lock/pg_try_advisory_lock
-        - Handle lock release automatically in finally block using pg_advisory_unlock
-        - Support both shared and exclusive locks if needed
-        - Convert string keys to appropriate integer format for PostgreSQL
-        - Raise exceptions when wait=False and lock cannot be acquired
-        """
-        with advisory_lock(key, shared=shared, wait=wait, db_alias=db_alias) as lock:
-            yield lock
 
     def _process_packages(self):
         for group, packages in self.packages.items():
